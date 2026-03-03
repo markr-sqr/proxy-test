@@ -1,0 +1,11 @@
+.venv/
+certs/
+__pycache__/
+.git/
+.claude/
+tests/
+*.md
+.gitignore
+.dockerignore
+viewer/node_modules/
+viewer/dist/
