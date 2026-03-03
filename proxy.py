@@ -2,11 +2,13 @@
 """HTTP/HTTPS forward proxy server with optional TLS interception."""
 
 import argparse
+import re
 import socket
 import select
 import ssl
 import threading
 from datetime import datetime
+from urllib.parse import unquote_plus
 
 BUFFER_SIZE = 65536
 DEFAULT_PORT = 8080
@@ -22,6 +24,146 @@ def log(client_addr, method, target, status="->"):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _log_lock:
         print(f"[{ts}] {client_addr[0]}:{client_addr[1]}  {status}  {method}  {target}")
+
+
+# ── Security risk detection ──────────────────────────────────────────────────
+RED = "\033[91m"
+YELLOW = "\033[93m"
+CYAN = "\033[96m"
+RESET = "\033[0m"
+
+_SEVERITY_COLOUR = {"HIGH": RED, "MEDIUM": YELLOW, "LOW": CYAN}
+
+# Pre-compiled patterns
+_SQL_RE = re.compile(
+    r"(?:UNION\s+SELECT|OR\s+1\s*=\s*1|'\s*OR\s*'|DROP\s+TABLE|;\s*--|;\s*\w)",
+    re.IGNORECASE,
+)
+_XSS_RE = re.compile(
+    r"(?:<script|javascript:|onerror\s*=|onload\s*=|eval\s*\(|document\.cookie)",
+    re.IGNORECASE,
+)
+_PATH_TRAVERSAL_RE = re.compile(
+    r"(?:\.\./|\.\.%2[fF]|\.\.%5[cC]|%2[eE]%2[eE])",
+)
+_CMD_INJECTION_RE = re.compile(
+    r"(?:`|\$\(|;\s|(?<!=)\|\s|&&\s)",
+)
+_SENSITIVE_PARAM_RE = re.compile(
+    r"(?:^|[?&])(?:password|passwd|secret|api_key|token|apikey)=",
+    re.IGNORECASE,
+)
+_AUTH_PATH_RE = re.compile(
+    r"/(?:login|auth|signin)(?:[/?#]|$)",
+    re.IGNORECASE,
+)
+_PRIVATE_IP_RE = re.compile(
+    r"(?:^|://)(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|127\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|169\.254\.\d{1,3}\.\d{1,3}"
+    r"|localhost)(?:[:/?#]|$)",
+    re.IGNORECASE,
+)
+_BASIC_AUTH_RE = re.compile(
+    r"^Authorization:\s*Basic\s+\S",
+    re.IGNORECASE | re.MULTILINE,
+)
+_BEARER_AUTH_RE = re.compile(
+    r"^Authorization:\s*Bearer\s+\S",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PROXY_AUTH_RE = re.compile(
+    r"^Proxy-Authorization:\s*\S",
+    re.IGNORECASE | re.MULTILINE,
+)
+_BODY_CRED_RE = re.compile(
+    r"(?:^|&)(?:password|passwd|pass|credential|user_password|old_password|new_password)=[^&\s]+",
+    re.IGNORECASE,
+)
+_SUSPICIOUS_METHODS = {"TRACE", "TRACK", "DEBUG"}
+
+
+def _check_risks(method, url, headers=""):
+    """Inspect a request for common attack patterns.
+
+    Returns a list of (severity, description) tuples.
+    """
+    risks = []
+    url_decoded = unquote_plus(url)
+    combined = url_decoded + "\n" + headers
+
+    # SQL injection
+    m = _SQL_RE.search(combined)
+    if m:
+        risks.append(("HIGH", f"SQL injection pattern: {m.group()!r}"))
+
+    # XSS
+    m = _XSS_RE.search(combined)
+    if m:
+        risks.append(("HIGH", f"XSS pattern: {m.group()!r}"))
+
+    # Path traversal
+    m = _PATH_TRAVERSAL_RE.search(url)
+    if m:
+        risks.append(("HIGH", f"Path traversal pattern: {m.group()!r}"))
+
+    # Command injection
+    m = _CMD_INJECTION_RE.search(combined)
+    if m:
+        risks.append(("HIGH", f"Command injection pattern: {m.group()!r}"))
+
+    # Sensitive data in URL
+    if "?" in url:
+        query = url.split("?", 1)[1]
+        m = _SENSITIVE_PARAM_RE.search("?" + query)
+        if m:
+            risks.append(("MEDIUM", f"Sensitive data in URL: {m.group().strip('?&')}"))
+
+    # Cleartext credentials (HTTP to auth paths)
+    if url.startswith("http://") and _AUTH_PATH_RE.search(url):
+        risks.append(("MEDIUM", "Cleartext request to authentication endpoint"))
+
+    # Plaintext auth headers over HTTP
+    is_cleartext = url.startswith("http://")
+    if is_cleartext and _BASIC_AUTH_RE.search(headers):
+        risks.append(("HIGH", "Plaintext HTTP Basic credentials in Authorization header"))
+    if is_cleartext and _BEARER_AUTH_RE.search(headers):
+        risks.append(("HIGH", "Plaintext Bearer token in Authorization header"))
+
+    # Proxy-Authorization exposes credentials to the proxy
+    if _PROXY_AUTH_RE.search(headers):
+        risks.append(("MEDIUM", "Proxy authentication credentials in request"))
+
+    # Plaintext credentials in request body
+    if is_cleartext and _BODY_CRED_RE.search(headers):
+        risks.append(("HIGH", "Plaintext credentials in request body"))
+
+    # SSRF indicators
+    if _PRIVATE_IP_RE.search(url):
+        risks.append(("MEDIUM", "Request targets private/internal IP address"))
+
+    # Suspicious methods
+    if method.upper() in _SUSPICIOUS_METHODS:
+        risks.append(("LOW", f"Suspicious HTTP method: {method}"))
+
+    return risks
+
+
+def _log_risk(client_addr, severity, description):
+    """Print a colour-coded risk warning."""
+    colour = _SEVERITY_COLOUR.get(severity, "")
+    with _log_lock:
+        print(f"  {colour}\u26a0 [{severity}] {description}{RESET}")
+
+
+def _check_host_risks(host):
+    """Check SSRF indicators on a host string (for CONNECT targets)."""
+    risks = []
+    if _PRIVATE_IP_RE.search(host):
+        risks.append(("MEDIUM", "CONNECT targets private/internal IP address"))
+    return risks
 
 
 def _blind_tunnel(client_sock, remote_sock):
@@ -58,7 +200,11 @@ def _log_request(data, host, addr):
         parts = decoded.split()
         if len(parts) >= 2:
             method, path = parts[0], parts[1]
-            log(addr, method, f"https://{host}{path}", "MITM")
+            full_url = f"https://{host}{path}"
+            log(addr, method, full_url, "MITM")
+            header_text = data.decode("ascii", errors="replace")
+            for severity, desc in _check_risks(method, full_url, header_text):
+                _log_risk(addr, severity, desc)
         else:
             log(addr, "???", f"https://{host} (unparseable)", "MITM")
     except Exception:
@@ -100,6 +246,8 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
 def handle_connect(client_sock, host, port, addr):
     """Handle CONNECT: blind tunnel or TLS interception."""
     log(addr, "CONNECT", f"{host}:{port}")
+    for severity, desc in _check_host_risks(host):
+        _log_risk(addr, severity, desc)
 
     if not _mitm_enabled:
         try:
@@ -154,9 +302,15 @@ def handle_connect(client_sock, host, port, addr):
         remote_tls.close()
 
 
-def handle_http(client_sock, method, url, version, header_rest, addr):
+def handle_http(client_sock, method, url, version, header_rest, addr,
+                body_start=b""):
     """Handle plain HTTP requests by forwarding them."""
     log(addr, method, url)
+    scan_text = header_rest
+    if body_start:
+        scan_text += body_start.decode("ascii", errors="replace")
+    for severity, desc in _check_risks(method, url, scan_text):
+        _log_risk(addr, severity, desc)
     url_no_scheme = url.split("://", 1)[1] if "://" in url else url
     slash_idx = url_no_scheme.find("/")
     if slash_idx == -1:
@@ -221,6 +375,8 @@ def handle_client(client_sock, addr):
 
         method, target, version = parts[0], parts[1], parts[2]
 
+        body_start = raw[header_end:]
+
         if method.upper() == "CONNECT":
             if ":" in target:
                 host, port = target.rsplit(":", 1)
@@ -230,7 +386,8 @@ def handle_client(client_sock, addr):
                 port = 443
             handle_connect(client_sock, host, port, addr)
         else:
-            handle_http(client_sock, method, target, version, rest, addr)
+            handle_http(client_sock, method, target, version, rest, addr,
+                        body_start)
 
     except Exception as e:
         print(f"[!] Error handling {addr}: {e}")
