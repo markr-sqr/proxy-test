@@ -2,28 +2,27 @@
 """HTTP/HTTPS forward proxy server with optional TLS interception."""
 
 import argparse
+import base64
+import json
+import os
 import re
 import socket
 import select
 import ssl
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import unquote_plus
 
 BUFFER_SIZE = 65536
 DEFAULT_PORT = 8080
+LOG_FILE = os.environ.get("PROXY_LOG_FILE", "/tmp/proxy.log")
+MAX_BODY_LOG = 8192
 
 _log_lock = threading.Lock()
 _ca_cert = None
 _ca_key = None
 _mitm_enabled = False
 _mitm_verify_upstream = True
-
-
-def log(client_addr, method, target, status="->"):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with _log_lock:
-        print(f"[{ts}] {client_addr[0]}:{client_addr[1]}  {status}  {method}  {target}")
 
 
 # ── Security risk detection ──────────────────────────────────────────────────
@@ -151,19 +150,75 @@ def _check_risks(method, url, headers=""):
     return risks
 
 
-def _log_risk(client_addr, severity, description):
-    """Print a colour-coded risk warning."""
-    colour = _SEVERITY_COLOUR.get(severity, "")
-    with _log_lock:
-        print(f"  {colour}\u26a0 [{severity}] {description}{RESET}")
-
-
 def _check_host_risks(host):
     """Check SSRF indicators on a host string (for CONNECT targets)."""
     risks = []
     if _PRIVATE_IP_RE.search(host):
         risks.append(("MEDIUM", "CONNECT targets private/internal IP address"))
     return risks
+
+
+def _build_payload(request_line, headers_str, body_bytes):
+    """Build a payload dict from raw request components."""
+    headers = []
+    for line in headers_str.split("\r\n"):
+        if not line:
+            continue
+        if ": " in line:
+            name, value = line.split(": ", 1)
+            headers.append([name, value])
+        elif ":" in line:
+            name, value = line.split(":", 1)
+            headers.append([name, value.lstrip()])
+
+    truncated = len(body_bytes) > MAX_BODY_LOG
+    body_chunk = body_bytes[:MAX_BODY_LOG]
+
+    try:
+        body = body_chunk.decode("utf-8")
+        body_is_binary = False
+    except UnicodeDecodeError:
+        body = base64.b64encode(body_chunk).decode("ascii")
+        body_is_binary = True
+
+    return {
+        "request_line": request_line,
+        "headers": headers,
+        "body": body,
+        "body_is_binary": body_is_binary,
+        "body_truncated": truncated,
+    }
+
+
+def log_request(client_addr, method, target, status="->", risks=None, payload=None):
+    """Log a request to stdout and append a JSONL line to LOG_FILE."""
+    if risks is None:
+        risks = []
+    ts = datetime.now(timezone.utc)
+    ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+
+    with _log_lock:
+        print(f"[{ts_str}] {client_addr[0]}:{client_addr[1]}  {status}  {method}  {target}")
+        for severity, desc in risks:
+            colour = _SEVERITY_COLOUR.get(severity, "")
+            print(f"  {colour}\u26a0 [{severity}] {desc}{RESET}")
+
+        entry = {
+            "timestamp": ts.isoformat(),
+            "client_ip": client_addr[0],
+            "client_port": client_addr[1],
+            "method": method,
+            "target": target,
+            "status": status,
+            "risks": [{"severity": s, "description": d} for s, d in risks],
+        }
+        if payload is not None:
+            entry["payload"] = payload
+        try:
+            with open(LOG_FILE, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except OSError:
+            pass
 
 
 def _blind_tunnel(client_sock, remote_sock):
@@ -185,8 +240,8 @@ def _blind_tunnel(client_sock, remote_sock):
         client_sock.close()
 
 
-def _log_request(data, host, addr):
-    """Log the HTTP request line from decrypted data."""
+def _log_mitm_request(data, host, addr):
+    """Log the HTTP request line from decrypted MITM data."""
     try:
         first_line_end = data.find(b"\r\n")
         if first_line_end == -1:
@@ -201,12 +256,25 @@ def _log_request(data, host, addr):
         if len(parts) >= 2:
             method, path = parts[0], parts[1]
             full_url = f"https://{host}{path}"
-            log(addr, method, full_url, "MITM")
             header_text = data.decode("ascii", errors="replace")
-            for severity, desc in _check_risks(method, full_url, header_text):
-                _log_risk(addr, severity, desc)
+            risks = _check_risks(method, full_url, header_text)
+
+            # Parse headers and body for payload capture
+            header_body = data.split(b"\r\n\r\n", 1)
+            if len(header_body) == 2:
+                header_block = header_body[0].decode("ascii", errors="replace")
+                body_bytes = header_body[1]
+                # Skip the request line to get just headers
+                _, headers_str = header_block.split("\r\n", 1) if "\r\n" in header_block else (header_block, "")
+            else:
+                headers_str = ""
+                body_bytes = b""
+
+            request_line = f"{method} {full_url} {parts[2] if len(parts) >= 3 else 'HTTP/1.1'}"
+            payload = _build_payload(request_line, headers_str, body_bytes)
+            log_request(addr, method, full_url, "MITM", risks, payload=payload)
         else:
-            log(addr, "???", f"https://{host} (unparseable)", "MITM")
+            log_request(addr, "???", f"https://{host} (unparseable)", "MITM")
     except Exception:
         pass
 
@@ -229,7 +297,7 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
                 return
 
             if sock is client_tls:
-                _log_request(data, host, addr)
+                _log_mitm_request(data, host, addr)
                 remote_tls.sendall(data)
             else:
                 client_tls.sendall(data)
@@ -245,20 +313,19 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
 
 def handle_connect(client_sock, host, port, addr):
     """Handle CONNECT: blind tunnel or TLS interception."""
-    log(addr, "CONNECT", f"{host}:{port}")
-    for severity, desc in _check_host_risks(host):
-        _log_risk(addr, severity, desc)
+    target = f"{host}:{port}"
+    risks = _check_host_risks(host)
 
     if not _mitm_enabled:
         try:
             remote_sock = socket.create_connection((host, port), timeout=10)
         except Exception as e:
-            log(addr, "CONNECT", f"{host}:{port}", "502")
+            log_request(addr, "CONNECT", target, "502", risks)
             client_sock.sendall(f"HTTP/1.1 502 Bad Gateway\r\n\r\n{e}".encode())
             client_sock.close()
             return
 
-        log(addr, "CONNECT", f"{host}:{port}", "200")
+        log_request(addr, "CONNECT", target, "200", risks)
         client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         _blind_tunnel(client_sock, remote_sock)
         return
@@ -279,7 +346,7 @@ def handle_connect(client_sock, host, port, addr):
         upstream_ctx.set_alpn_protocols(["http/1.1"])
         remote_tls = upstream_ctx.wrap_socket(raw_remote, server_hostname=host)
     except Exception as e:
-        log(addr, "CONNECT", f"{host}:{port}", f"502-upstream({e})")
+        log_request(addr, "CONNECT", target, f"502-upstream({e})", risks)
         client_sock.close()
         return
 
@@ -289,12 +356,12 @@ def handle_connect(client_sock, host, port, addr):
         server_ctx = make_server_ctx(cert_path)
         client_tls = server_ctx.wrap_socket(client_sock, server_side=True)
     except Exception as e:
-        log(addr, "CONNECT", f"{host}:{port}", f"TLS-ERR({e})")
+        log_request(addr, "CONNECT", target, f"TLS-ERR({e})", risks)
         remote_tls.close()
         client_sock.close()
         return
 
-    log(addr, "MITM", f"{host}:{port}", "intercepting")
+    log_request(addr, "CONNECT", target, "MITM", risks)
     try:
         _mitm_relay(client_tls, remote_tls, host, addr)
     finally:
@@ -305,12 +372,11 @@ def handle_connect(client_sock, host, port, addr):
 def handle_http(client_sock, method, url, version, header_rest, addr,
                 body_start=b""):
     """Handle plain HTTP requests by forwarding them."""
-    log(addr, method, url)
     scan_text = header_rest
     if body_start:
         scan_text += body_start.decode("ascii", errors="replace")
-    for severity, desc in _check_risks(method, url, scan_text):
-        _log_risk(addr, severity, desc)
+    risks = _check_risks(method, url, scan_text)
+
     url_no_scheme = url.split("://", 1)[1] if "://" in url else url
     slash_idx = url_no_scheme.find("/")
     if slash_idx == -1:
@@ -327,15 +393,18 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
         host = host_port
         port = 80
 
+    request_line = f"{method} {url} {version}"
+    payload = _build_payload(request_line, header_rest, body_start)
+
     try:
         remote_sock = socket.create_connection((host, port), timeout=10)
     except Exception as e:
-        log(addr, method, url, "502")
+        log_request(addr, method, url, "502", risks, payload=payload)
         client_sock.sendall(f"HTTP/1.1 502 Bad Gateway\r\n\r\n{e}".encode())
         client_sock.close()
         return
 
-    log(addr, method, url, "200")
+    log_request(addr, method, url, "200", risks, payload=payload)
     request = f"{method} {path} {version}\r\n{header_rest}"
     try:
         remote_sock.sendall(request.encode())
@@ -418,6 +487,14 @@ def main():
         help="Skip upstream TLS certificate verification (use with --mitm)",
     )
     args = parser.parse_args()
+
+    # Ensure log file exists and is writable
+    try:
+        with open(LOG_FILE, "a"):
+            pass
+        print(f"[*] Logging to {LOG_FILE}")
+    except OSError as e:
+        print(f"[!] Warning: cannot write to {LOG_FILE}: {e}")
 
     if args.mitm:
         from mitm_certs import ensure_ca, CA_CERT_PATH
