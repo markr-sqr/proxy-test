@@ -1,20 +1,20 @@
 # MITM Web Proxy - Instructions
 
-A Python-based HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-middle) capability. Designed for development, debugging, and traffic inspection.
+A Python-based HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-middle) capability, request payload capture, and a web-based log viewer. Designed for development, debugging, and traffic inspection.
 
 ---
 
 ## Table of Contents
 
-1. [Requirements](#requirements)
-2. [File Overview](#file-overview)
-3. [Installation](#installation)
-4. [Quick Start](#quick-start)
-5. [Operating Modes](#operating-modes)
-6. [Command-Line Reference](#command-line-reference)
-7. [Using the Proxy with curl](#using-the-proxy-with-curl)
-8. [Using the Proxy with a Browser](#using-the-proxy-with-a-browser)
-9. [Using the Proxy System-Wide](#using-the-proxy-system-wide)
+1. [Deployment (Docker — Recommended)](#deployment-docker--recommended)
+2. [Alternative: Manual Setup](#alternative-manual-setup)
+3. [Quick Start](#quick-start)
+4. [Operating Modes](#operating-modes)
+5. [Command-Line Reference](#command-line-reference)
+6. [Using the Proxy with curl](#using-the-proxy-with-curl)
+7. [Using the Proxy with a Browser](#using-the-proxy-with-a-browser)
+8. [Using the Proxy System-Wide](#using-the-proxy-system-wide)
+9. [Log Viewer](#log-viewer)
 10. [Understanding the Log Output](#understanding-the-log-output)
 11. [Certificate Management](#certificate-management)
 12. [Testing](#testing)
@@ -24,49 +24,134 @@ A Python-based HTTP/HTTPS forward proxy with optional TLS interception (man-in-t
 
 ---
 
-## Requirements
+## Deployment (Docker — Recommended)
 
-- Python 3.8 or later (with the `venv` module — included in most distributions)
-- `cryptography` library (only required for MITM mode; installed automatically by the venv setup)
-- Standard CLI tools for running the test suite: `curl`, `openssl`, `nc` (netcat), `ss`
+Docker is the recommended way to deploy the proxy. A single container runs both the proxy and the web-based log viewer with all dependencies pre-installed. No Python venv, Node.js, or manual setup required.
+
+### Prerequisites
+
+- Docker Engine 20.10+ and Docker Compose v2+
+
+### Start the proxy
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **Proxy** on port `8080` — MITM mode with `--no-verify` by default
+- **Log viewer** on port `9999` — web UI at `/ui/logs`, API at `/api/logs`
+
+### Verify it is running
+
+```bash
+docker compose ps          # Check container health
+docker compose logs -f     # Follow live log output
+```
+
+### Test it
+
+```bash
+# HTTP request through the proxy
+curl -x http://localhost:8080 http://example.com
+
+# HTTPS request (trust the generated CA)
+curl --cacert certs/ca.pem -x http://localhost:8080 https://example.com
+
+# View logs in your browser
+open http://localhost:9999/ui/logs
+
+# Query the log API
+curl http://localhost:9999/api/logs
+```
+
+### Configuration
+
+Override defaults with environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXY_PORT` | `8080` | Host port for the proxy |
+| `VIEWER_PORT` | `9999` | Host port for the log viewer |
+| `PROXY_UID` | `1000` | UID the container runs as |
+| `PROXY_GID` | `1000` | GID the container runs as |
+
+```bash
+PROXY_PORT=3128 VIEWER_PORT=8888 docker compose up -d
+```
+
+### Persistent data
+
+The `certs/` directory is bind-mounted from the host, so CA and per-host certificates persist across container restarts. Logs are stored inside the container at `/tmp/proxy.log` and reset on container recreation.
+
+### Common Docker commands
+
+```bash
+docker compose up -d          # Start in background
+docker compose logs -f        # Follow proxy + viewer logs
+docker compose restart        # Restart after config changes
+docker compose down           # Stop and remove container
+docker compose build          # Rebuild after code changes
+docker compose up -d --build  # Rebuild and restart in one step
+```
+
+### Passing custom proxy flags
+
+The default entrypoint runs `proxy.py --mitm --no-verify`. To override, edit the `command` in `docker-compose.yml`:
+
+```yaml
+services:
+  proxy:
+    build: .
+    command: ["--mitm"]  # e.g., enable upstream TLS verification
+```
+
+Or for passthrough mode (no MITM):
+
+```yaml
+    command: []  # no flags = passthrough mode
+```
 
 ---
 
-## File Overview
+## Alternative: Manual Setup
+
+If you prefer to run directly on your host without Docker, you need to install dependencies manually.
+
+### Requirements
+
+- Python 3.8+ (with the `venv` module)
+- `cryptography` library (only for MITM mode)
+- Node.js 18+ (only for the log viewer)
+- `curl`, `openssl`, `nc`, `ss` (for the test suite)
+
+### File Overview
 
 ```
-proxy.py              Main proxy server script
+proxy.py              Main proxy server with payload capture
 mitm_certs.py         Certificate generation module (CA + per-host certs)
 requirements.txt      Python dependencies (used by venv setup)
+Dockerfile            Container image definition (for Docker deployment)
+docker-compose.yml    Docker Compose service configuration
+entrypoint.sh         Container entrypoint (starts proxy + viewer)
+viewer/               Web-based log viewer (Express + TypeScript)
+  src/
+    index.ts          Viewer server entry point
+    types.ts          TypeScript interfaces
+    routes/logs.ts    API route handlers
+    services/         Log file reading service
+    public/logs.html  Log viewer UI
 certs/                Auto-generated directory (created on first --mitm run)
   ca.pem              CA certificate (share this with clients)
   ca-key.pem          CA private key (keep this secret, mode 0600)
   hosts/              Cached per-host certificates
-    example.com.pem
-    github.com.pem
-    ...
 .venv/                Python virtual environment (auto-created by test suite)
 tests/                Shell-based test suite
-  setup_venv.sh       Creates/reuses .venv and installs dependencies
-  helpers.sh          Shared utilities sourced by every test script
-  run_all.sh          Runs all test scripts and prints a summary
-  test_startup.sh     Startup and CLI flag tests
-  test_http.sh        HTTP forwarding tests
-  test_https_passthrough.sh   HTTPS passthrough (non-MITM) tests
-  test_mitm.sh        MITM interception tests
-  test_certs.sh       Certificate validation tests
-  test_errors.sh      Error handling tests
 ```
 
----
+### Installation
 
-## Installation
-
-1. Clone or copy `proxy.py`, `mitm_certs.py`, and `requirements.txt` into the same directory.
-
-2. Create a virtual environment and install dependencies:
-
-### Option A: manual venv setup
+#### Option A: manual venv setup
 
 ```bash
 cd proxy-test
@@ -75,90 +160,78 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-After this, `python3` inside the activated shell points to the venv interpreter and has access to `cryptography`.
-
-### Option B: use the setup helper script
+#### Option B: use the setup helper script
 
 ```bash
 cd proxy-test
 source tests/setup_venv.sh
 ```
 
-This creates the `.venv/` (if it doesn't exist), installs dependencies, and exports a `$PYTHON` variable pointing at `.venv/bin/python3`. Use `$PYTHON` in place of `python3` to run the proxy:
+This creates the `.venv/` (if it doesn't exist), installs dependencies, and exports a `$PYTHON` variable pointing at `.venv/bin/python3`.
 
 ```bash
 $PYTHON proxy.py --mitm --no-verify
 ```
 
-On subsequent runs the install step is skipped automatically unless `requirements.txt` changes (tracked via a hash stamp at `.venv/.requirements.stamp`).
-
-### Option C: let the test suite do everything
-
-Running the test suite also bootstraps the venv as a side effect:
+#### Option C: let the test suite do everything
 
 ```bash
 bash tests/run_all.sh
 ```
 
-After this, the `.venv/` exists and you can activate it or source the helper to run the proxy directly.
+After this, the `.venv/` exists and you can activate it or source the helper.
 
-### Passthrough mode without a venv
+#### Log viewer (manual)
 
-If you only need passthrough mode (no MITM), the proxy has no third-party dependencies. You can run it with system Python and skip the venv entirely:
+```bash
+cd viewer && npm install && npx tsc && node dist/index.js
+```
+
+The viewer runs on port 9999 and reads from `/tmp/proxy.log`.
+
+#### Passthrough mode without a venv
+
+If you only need passthrough mode (no MITM), the proxy has no third-party dependencies:
 
 ```bash
 python3 proxy.py
 ```
 
-### Manual pip install (not recommended)
-
-If you prefer to install into your system Python instead of a venv:
-
-```bash
-pip install cryptography
-```
-
-This works but is not recommended — a venv keeps the proxy's dependency isolated from the rest of your system.
-
 ---
 
 ## Quick Start
 
-All examples below assume you have set up the venv first (see [Installation](#installation)).
+### Docker (recommended)
 
-### Option A: activate the venv (stays active for your shell session)
+```bash
+docker compose up -d
+curl -x http://localhost:8080 http://example.com
+open http://localhost:9999/ui/logs
+```
+
+### Manual
+
+All examples below assume you have set up the venv first (see [Alternative: Manual Setup](#alternative-manual-setup)).
 
 ```bash
 source .venv/bin/activate
 ```
 
-### Option B: use the setup helper (sets `$PYTHON` without activating)
-
-```bash
-source tests/setup_venv.sh
-```
-
-Then use `$PYTHON` in place of `python3` in the commands below. Either option works; choose whichever you prefer.
-
 ### Passthrough mode (no TLS inspection)
 
 ```bash
-python3 proxy.py              # if venv is activated
-# or
-$PYTHON proxy.py              # if using setup helper
+python3 proxy.py
 ```
 
-The proxy starts on port 8080 by default. It forwards HTTP requests and blindly tunnels HTTPS connections without inspecting them. Passthrough mode has no third-party dependencies, so it also works without the venv.
+The proxy starts on port 8080 by default. It forwards HTTP requests and blindly tunnels HTTPS connections without inspecting them.
 
 ### MITM mode (TLS interception with logging)
 
 ```bash
-python3 proxy.py --mitm --no-verify    # if venv is activated
-# or
-$PYTHON proxy.py --mitm --no-verify    # if using setup helper
+python3 proxy.py --mitm --no-verify
 ```
 
-On first run, the proxy generates a CA certificate at `certs/ca.pem`. All HTTPS traffic is decrypted, logged, and re-encrypted transparently. MITM mode requires the `cryptography` package, which is why the venv is needed.
+On first run, the proxy generates a CA certificate at `certs/ca.pem`. All HTTPS traffic is decrypted, logged, and re-encrypted transparently.
 
 Test it immediately:
 
@@ -354,9 +427,41 @@ Most command-line tools (curl, wget, pip, npm, apt) respect these environment va
 
 ---
 
+## Log Viewer
+
+The proxy includes a web-based log viewer that runs alongside the proxy (started automatically in Docker, or manually via `node viewer/dist/index.js`).
+
+### Web UI
+
+Open `http://localhost:9999/ui/logs` in your browser. The UI provides:
+
+- **Filterable table** — filter by method, URL substring, severity, and time range
+- **Content-type badges** — each row shows the request content type (e.g., `image/png`, `application/json`) next to the method pill for quick identification
+- **Expandable detail rows** — click any row to see:
+  - Security risk details with severity badges
+  - Full request line, headers, and body
+  - Image previews for image payloads (rendered inline)
+  - Auto-decoded data: base64, JWT tokens, URL-encoded forms, hex-encoded content
+- **Auto-refresh** — toggle 5-second polling to watch requests in real time
+- **Pagination** — navigate through large log files
+
+### REST API
+
+See [LOG_SERVICE.md](LOG_SERVICE.md) for full API documentation including query parameters, response schema, and examples.
+
+```bash
+# Quick examples
+curl http://localhost:9999/api/logs                        # All logs
+curl "http://localhost:9999/api/logs?method=POST"          # POST requests only
+curl "http://localhost:9999/api/logs?severity=HIGH"        # High-risk entries
+curl "http://localhost:9999/api/logs?url=example.com"      # URL search
+```
+
+---
+
 ## Understanding the Log Output
 
-Every proxied request is logged to the console with a timestamp, client address, status, method, and target.
+Every proxied request is logged to the console and to a JSONL file (`/tmp/proxy.log`) with full payload data.
 
 ### Log format
 
@@ -580,7 +685,30 @@ Each test script is self-contained: it sources `helpers.sh` (which bootstraps th
 
 ## Troubleshooting
 
-### "Address already in use" on startup
+### Docker: container exits immediately
+
+Check the logs for errors:
+
+```bash
+docker compose logs
+```
+
+Common causes: port conflict (another process using 8080 or 9999), or permission issues with the `certs/` volume.
+
+### Docker: port conflict
+
+```bash
+# Use different host ports
+PROXY_PORT=3128 VIEWER_PORT=8888 docker compose up -d
+```
+
+### Docker: rebuild after code changes
+
+```bash
+docker compose up -d --build
+```
+
+### "Address already in use" on startup (manual mode)
 
 Another process is using the port. Either stop the other process or choose a different port:
 
@@ -699,13 +827,19 @@ This tool is intended for **development and debugging only**. Keep the following
 
 | File | Purpose |
 |------|---------|
-| `proxy.py` | Main proxy server. Handles HTTP forwarding, CONNECT tunneling, MITM interception, and request logging. Uses Python's `socket`, `select`, `ssl`, and `threading` modules. |
+| `proxy.py` | Main proxy server. Handles HTTP forwarding, CONNECT tunneling, MITM interception, payload capture, and JSONL logging. Uses Python's `socket`, `select`, `ssl`, and `threading` modules. |
 | `mitm_certs.py` | Certificate generation. Creates the root CA on first run, generates per-host certificates on demand, and provides SSL context factories. Uses the `cryptography` library. |
 | `requirements.txt` | Python dependencies for the project (`cryptography`). Used by the venv setup. |
+| `Dockerfile` | Container image definition. Bundles Python, Node.js, proxy, and viewer into a single image. |
+| `docker-compose.yml` | Docker Compose service configuration. Exposes proxy (8080) and viewer (9999) ports, bind-mounts `certs/`. |
+| `entrypoint.sh` | Container entrypoint. Starts both the proxy and viewer as background processes, handles graceful shutdown. |
+| `viewer/src/index.ts` | Log viewer Express server. Serves the web UI and REST API on port 9999. |
+| `viewer/src/routes/logs.ts` | API route handler for `/api/logs` with filtering and pagination. |
+| `viewer/src/public/logs.html` | Log viewer web UI. Renders log table with payload inspection, image previews, and auto-decoding. |
 | `tests/setup_venv.sh` | Venv bootstrap script. Creates `.venv/`, installs deps, exports `$PYTHON`. |
 | `tests/helpers.sh` | Shared test utilities. Sources the venv setup, provides proxy start/stop, TAP assertion helpers, and cleanup traps. |
 | `tests/run_all.sh` | Test runner. Executes all `test_*.sh` scripts and summarizes pass/fail counts. |
-| `tests/test_*.sh` | Individual test scripts (6 files, 36 tests total). Each is self-contained and sources `helpers.sh`. |
+| `tests/test_*.sh` | Individual test scripts (7 files). Each is self-contained and sources `helpers.sh`. |
 
 ### Request flow: passthrough HTTPS
 
