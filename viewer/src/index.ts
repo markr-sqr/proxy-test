@@ -26,6 +26,10 @@ app.get("/ui/logs", (_req, res) => {
   res.sendFile(path.join(__dirname, "../public/logs.html"));
 });
 
+app.use((_req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[viewer] Listening on 0.0.0.0:${PORT}`);
 });

@@ -84,7 +84,7 @@ _BODY_CRED_RE = re.compile(
 _SUSPICIOUS_METHODS = {"TRACE", "TRACK", "DEBUG"}
 
 
-def _check_risks(method, url, headers=""):
+def _check_risks(method, url, headers="", body=""):
     """Inspect a request for common attack patterns.
 
     Returns a list of (severity, description) tuples.
@@ -136,7 +136,7 @@ def _check_risks(method, url, headers=""):
         risks.append(("MEDIUM", "Proxy authentication credentials in request"))
 
     # Plaintext credentials in request body
-    if is_cleartext and _BODY_CRED_RE.search(headers):
+    if is_cleartext and body and _BODY_CRED_RE.search(body):
         risks.append(("HIGH", "Plaintext credentials in request body"))
 
     # SSRF indicators
@@ -256,9 +256,6 @@ def _log_mitm_request(data, host, addr):
         if len(parts) >= 2:
             method, path = parts[0], parts[1]
             full_url = f"https://{host}{path}"
-            header_text = data.decode("ascii", errors="replace")
-            risks = _check_risks(method, full_url, header_text)
-
             # Parse headers and body for payload capture
             header_body = data.split(b"\r\n\r\n", 1)
             if len(header_body) == 2:
@@ -269,6 +266,9 @@ def _log_mitm_request(data, host, addr):
             else:
                 headers_str = ""
                 body_bytes = b""
+
+            body_text = body_bytes.decode("ascii", errors="replace") if body_bytes else ""
+            risks = _check_risks(method, full_url, headers_str, body_text)
 
             request_line = f"{method} {full_url} {parts[2] if len(parts) >= 3 else 'HTTP/1.1'}"
             payload = _build_payload(request_line, headers_str, body_bytes)
@@ -321,7 +321,7 @@ def handle_connect(client_sock, host, port, addr):
             remote_sock = socket.create_connection((host, port), timeout=10)
         except Exception as e:
             log_request(addr, "CONNECT", target, "502", risks)
-            client_sock.sendall(f"HTTP/1.1 502 Bad Gateway\r\n\r\n{e}".encode())
+            client_sock.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
             client_sock.close()
             return
 
@@ -372,10 +372,8 @@ def handle_connect(client_sock, host, port, addr):
 def handle_http(client_sock, method, url, version, header_rest, addr,
                 body_start=b""):
     """Handle plain HTTP requests by forwarding them."""
-    scan_text = header_rest
-    if body_start:
-        scan_text += body_start.decode("ascii", errors="replace")
-    risks = _check_risks(method, url, scan_text)
+    body_text = body_start.decode("ascii", errors="replace") if body_start else ""
+    risks = _check_risks(method, url, header_rest, body_text)
 
     url_no_scheme = url.split("://", 1)[1] if "://" in url else url
     slash_idx = url_no_scheme.find("/")
@@ -396,18 +394,25 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
     request_line = f"{method} {url} {version}"
     payload = _build_payload(request_line, header_rest, body_start)
 
+    # Strip hop-by-hop Proxy-Connection header before forwarding
+    forwarded_headers = re.sub(
+        r"(?i)Proxy-Connection:[^\r\n]*\r\n", "", header_rest
+    )
+
     try:
         remote_sock = socket.create_connection((host, port), timeout=10)
     except Exception as e:
         log_request(addr, method, url, "502", risks, payload=payload)
-        client_sock.sendall(f"HTTP/1.1 502 Bad Gateway\r\n\r\n{e}".encode())
+        client_sock.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
         client_sock.close()
         return
 
-    log_request(addr, method, url, "200", risks, payload=payload)
-    request = f"{method} {path} {version}\r\n{header_rest}"
+    log_request(addr, method, url, "->", risks, payload=payload)
+    request = f"{method} {path} {version}\r\n{forwarded_headers}"
     try:
         remote_sock.sendall(request.encode())
+        if body_start:
+            remote_sock.sendall(body_start)
 
         while True:
             readable, _, _ = select.select([remote_sock], [], [], 30)
@@ -420,6 +425,17 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
     finally:
         remote_sock.close()
         client_sock.close()
+
+
+def _get_content_length(header_text):
+    """Extract Content-Length from header text, or return 0."""
+    for line in header_text.split("\r\n"):
+        if line.lower().startswith("content-length:"):
+            try:
+                return int(line.split(":", 1)[1].strip())
+            except ValueError:
+                return 0
+    return 0
 
 
 def handle_client(client_sock, addr):
@@ -445,6 +461,18 @@ def handle_client(client_sock, addr):
         method, target, version = parts[0], parts[1], parts[2]
 
         body_start = raw[header_end:]
+
+        # Read remaining body bytes based on Content-Length
+        if method.upper() != "CONNECT":
+            content_length = _get_content_length(rest)
+            if content_length > 0:
+                remaining = content_length - len(body_start)
+                while remaining > 0:
+                    chunk = client_sock.recv(min(BUFFER_SIZE, remaining))
+                    if not chunk:
+                        break
+                    body_start += chunk
+                    remaining -= len(chunk)
 
         if method.upper() == "CONNECT":
             if ":" in target:

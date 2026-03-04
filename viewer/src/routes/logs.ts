@@ -4,7 +4,7 @@ import { queryLogs } from "../services/logReader";
 
 const router = Router();
 
-router.get("/", (req: Request, res: Response) => {
+router.get("/", async (req: Request, res: Response) => {
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
   const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit as string) || 50));
 
@@ -18,7 +18,7 @@ router.get("/", (req: Request, res: Response) => {
     severity: (req.query.severity as string) || undefined,
   };
 
-  res.json(queryLogs(query));
+  res.json(await queryLogs(query));
 });
 
 export default router;

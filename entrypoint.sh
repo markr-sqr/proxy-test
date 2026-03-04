@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+EXIT_CODE=0
+
 cleanup() {
     kill "$PROXY_PID" "$VIEWER_PID" 2>/dev/null || true
     wait "$PROXY_PID" "$VIEWER_PID" 2>/dev/null || true
@@ -19,5 +21,7 @@ python3 -u /app/proxy.py "$@" &
 PROXY_PID=$!
 
 # Wait for either process to exit; if one dies, stop the other
-wait -n "$PROXY_PID" "$VIEWER_PID" 2>/dev/null || true
+wait -n "$PROXY_PID" "$VIEWER_PID" 2>/dev/null
+EXIT_CODE=$?
 cleanup
+exit "$EXIT_CODE"

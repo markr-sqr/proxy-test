@@ -1,14 +1,26 @@
-import { readFileSync, existsSync } from "fs";
+import { readFile, stat } from "fs/promises";
 import { LogEntry, LogQuery, LogResponse } from "../types";
 
 const LOG_FILE = process.env.PROXY_LOG_FILE || "/tmp/proxy.log";
 
-function parseLogFile(): LogEntry[] {
-  if (!existsSync(LOG_FILE)) {
+let cachedEntries: LogEntry[] = [];
+let cachedMtimeMs = 0;
+let cachedSize = 0;
+
+async function parseLogFile(): Promise<LogEntry[]> {
+  let fileStat;
+  try {
+    fileStat = await stat(LOG_FILE);
+  } catch {
     return [];
   }
 
-  const content = readFileSync(LOG_FILE, "utf-8");
+  // Return cache if file hasn't changed
+  if (fileStat.mtimeMs === cachedMtimeMs && fileStat.size === cachedSize) {
+    return cachedEntries;
+  }
+
+  const content = await readFile(LOG_FILE, "utf-8");
   const entries: LogEntry[] = [];
 
   for (const line of content.split("\n")) {
@@ -20,6 +32,10 @@ function parseLogFile(): LogEntry[] {
       // skip malformed lines
     }
   }
+
+  cachedEntries = entries;
+  cachedMtimeMs = fileStat.mtimeMs;
+  cachedSize = fileStat.size;
 
   return entries;
 }
@@ -55,8 +71,8 @@ function matchesQuery(entry: LogEntry, query: LogQuery): boolean {
   return true;
 }
 
-export function queryLogs(query: LogQuery): LogResponse {
-  const all = parseLogFile();
+export async function queryLogs(query: LogQuery): Promise<LogResponse> {
+  const all = await parseLogFile();
   const filtered = all.filter((e) => matchesQuery(e, query));
   const total = filtered.length;
 
