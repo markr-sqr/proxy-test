@@ -1,6 +1,6 @@
 # MITM Web Proxy
 
-A Python HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-middle) and built-in security risk detection. Designed for development, debugging, and traffic inspection.
+A Python HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-middle), built-in security risk detection, request payload capture, and a web-based log viewer. Designed for development, debugging, and traffic inspection.
 
 ## Features
 
@@ -8,29 +8,95 @@ A Python HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-mid
 - **HTTPS passthrough** — tunnels encrypted connections without inspection via CONNECT
 - **MITM interception** — decrypts, logs, and re-encrypts HTTPS traffic using on-the-fly certificate generation
 - **Security scanning** — inspects proxied requests for common attack patterns and authentication issues, logging colour-coded warnings in real time
+- **Payload capture** — logs full request headers and bodies (up to 8 KB), with auto-detection of binary content
+- **Web log viewer** — browser-based UI with filtering, pagination, payload inspection, and auto-decoding of base64, JWT, URL-encoded, and hex-encoded data
 - **Zero-config certificate management** — auto-generates a CA and per-host certificates on first use, caches them on disk
 
-## Requirements
+## Quick Start (Docker — Recommended)
 
-- Python 3.8+
-- `cryptography` library (only for MITM mode; installed automatically by the venv setup)
-- `curl`, `openssl`, `nc`, `ss` (for the test suite)
+Docker is the recommended way to run the proxy. It bundles the proxy, log viewer, and all dependencies in a single container.
 
-## Quick Start
+```bash
+docker compose up -d
+```
 
-### Passthrough mode (no dependencies)
+This starts:
+- **Proxy** on port `8080` (MITM mode with `--no-verify` by default)
+- **Log viewer** on port `9999`
+
+Test it immediately:
+
+```bash
+# Send a request through the proxy
+curl -x http://localhost:8080 http://example.com
+
+# View logs in your browser
+open http://localhost:9999/ui/logs
+
+# Or query the API directly
+curl http://localhost:9999/api/logs
+```
+
+For HTTPS interception, trust the generated CA certificate:
+
+```bash
+curl --cacert certs/ca.pem -x http://localhost:8080 https://example.com
+```
+
+### Docker configuration
+
+Override defaults with environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXY_PORT` | `8080` | Host port for the proxy |
+| `VIEWER_PORT` | `9999` | Host port for the log viewer |
+| `PROXY_UID` | `1000` | UID the container runs as |
+| `PROXY_GID` | `1000` | GID the container runs as |
+
+```bash
+# Example: custom ports
+PROXY_PORT=3128 VIEWER_PORT=8888 docker compose up -d
+```
+
+The `certs/` directory is bind-mounted, so generated CA and host certificates persist across container restarts.
+
+### Docker commands
+
+```bash
+docker compose up -d          # Start in background
+docker compose logs -f        # Follow proxy logs
+docker compose restart        # Restart after config changes
+docker compose down           # Stop and remove container
+docker compose build          # Rebuild after code changes
+```
+
+## Alternative: Manual Setup (without Docker)
+
+If you prefer to run directly on your host without Docker, you need Python 3.8+ and optionally Node.js 18+ (for the log viewer).
+
+### Proxy only (passthrough mode — no dependencies)
 
 ```bash
 python3 proxy.py
 ```
 
-Starts on port 8080. HTTP requests are forwarded and logged. HTTPS is tunneled without inspection.
-
-### MITM mode
+### Proxy with MITM mode
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 python3 proxy.py --mitm --no-verify
+```
+
+### Proxy + log viewer (manual)
+
+```bash
+# Terminal 1: start the proxy
+source .venv/bin/activate
+python3 proxy.py --mitm --no-verify
+
+# Terminal 2: start the log viewer
+cd viewer && npm install && npx tsc && node dist/index.js
 ```
 
 On first run a CA certificate is generated at `certs/ca.pem`. Test it with:
@@ -38,6 +104,13 @@ On first run a CA certificate is generated at `certs/ca.pem`. Test it with:
 ```bash
 curl --cacert certs/ca.pem -x http://localhost:8080 https://example.com
 ```
+
+### Requirements (manual setup)
+
+- Python 3.8+
+- `cryptography` library (only for MITM mode; installed automatically by the venv setup)
+- Node.js 18+ (only for the log viewer)
+- `curl`, `openssl`, `nc`, `ss` (for the test suite)
 
 ## Command-Line Reference
 
@@ -122,19 +195,55 @@ The proxy automatically inspects every proxied request and logs colour-coded war
 
 HIGH warnings appear in bright red, MEDIUM in yellow, LOW in cyan.
 
+## Log Viewer
+
+The log viewer runs on port 9999 (configurable via `VIEWER_PORT`) and provides:
+
+- **Web UI** at `/ui/logs` — table view with expandable rows, content-type badges, payload inspection, image previews, and auto-decoding of encoded data
+- **REST API** at `/api/logs` — paginated, filterable JSON endpoint
+
+See [LOG_SERVICE.md](LOG_SERVICE.md) for full API documentation.
+
 ## Log Format
+
+### Console output
 
 ```
 [TIMESTAMP] CLIENT_IP:PORT  STATUS  METHOD  TARGET
 ```
 
+### JSONL file (`/tmp/proxy.log`)
+
+Each request is also logged as a JSON line with full payload data:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | string | ISO 8601 timestamp (UTC) |
+| `client_ip` | string | Client IP address |
+| `client_port` | int | Client source port |
+| `method` | string | HTTP method |
+| `target` | string | Full request URL or `host:port` for CONNECT |
+| `status` | string | Result status (`200`, `502`, `MITM`, etc.) |
+| `risks` | Risk[] | Detected security risks |
+| `payload` | Payload? | Request payload (headers + body), if available |
+
+### Payload object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `request_line` | string | Full HTTP request line |
+| `headers` | [string, string][] | Header name-value pairs |
+| `body` | string | Request body (UTF-8 text, or base64 for binary) |
+| `body_is_binary` | boolean | Whether body is base64-encoded binary |
+| `body_truncated` | boolean | Whether body was truncated at 8 KB |
+
+### Status values
+
 | Status | Meaning |
 |--------|---------|
-| `->` | Request received |
 | `200` | Forwarded successfully |
 | `502` | Upstream unreachable |
 | `MITM` | Decrypted HTTPS request |
-| `intercepting` | MITM TLS session established |
 | `502-upstream(...)` | Upstream TLS failure |
 | `TLS-ERR(...)` | Client TLS handshake failure |
 
@@ -187,10 +296,24 @@ bash tests/test_security.sh
 ## Project Structure
 
 ```
-proxy.py              Main proxy server (~430 lines)
+proxy.py              Main proxy server with payload capture
 mitm_certs.py         CA and per-host certificate generation
 requirements.txt      Python dependencies (cryptography)
+Dockerfile            Container image definition
+docker-compose.yml    Docker Compose service configuration
+entrypoint.sh         Container entrypoint (starts proxy + viewer)
+.dockerignore         Docker build exclusions
 INSTRUCTIONS.md       Detailed usage guide
+LOG_SERVICE.md        Log viewer API documentation
+viewer/               Web-based log viewer (Express + TypeScript)
+  src/
+    index.ts          Viewer server entry point
+    types.ts          TypeScript interfaces (LogEntry, Payload, Risk)
+    routes/logs.ts    API route handlers
+    services/         Log file reading service
+    public/logs.html  Log viewer UI (HTML/CSS/JS)
+  package.json        Node.js dependencies
+  tsconfig.json       TypeScript configuration
 tests/
   run_all.sh          Test runner
   helpers.sh          Shared test utilities (TAP assertions, proxy management)

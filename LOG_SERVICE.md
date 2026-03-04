@@ -1,10 +1,30 @@
 # Log Viewer Service
 
-A JSON API that exposes structured proxy logs for querying. Runs on port **9999** inside the same container as the proxy.
+A web UI and JSON API that exposes structured proxy logs for querying. Runs on port **9999** inside the same container as the proxy.
+
+## Deployment
+
+The log viewer is included in the Docker image and starts automatically — no additional setup required.
+
+```bash
+docker compose up -d
+
+# Web UI
+open http://localhost:9999/ui/logs
+
+# API
+curl http://localhost:9999/api/logs
+```
+
+To run manually without Docker (requires Node.js 18+):
+
+```bash
+cd viewer && npm install && npx tsc && node dist/index.js
+```
 
 ## How It Works
 
-The proxy writes every request as a JSON line to `/tmp/proxy.log` (configurable via `PROXY_LOG_FILE` env var). The log viewer reads this file and serves it through a REST API with filtering and pagination.
+The proxy writes every request as a JSON line to `/tmp/proxy.log` (configurable via `PROXY_LOG_FILE` env var). The log viewer reads this file and serves it through a REST API with filtering and pagination. The web UI at `/ui/logs` provides an interactive table with expandable rows, payload inspection, image previews, and auto-decoding of encoded data.
 
 ## Endpoints
 
@@ -48,10 +68,21 @@ Returns paginated, filterable proxy log entries.
       "timestamp": "2026-03-03T21:54:47.145401+00:00",
       "client_ip": "172.24.0.1",
       "client_port": 39052,
-      "method": "GET",
-      "target": "http://example.com/",
+      "method": "POST",
+      "target": "http://example.com/api/data",
       "status": "200",
-      "risks": []
+      "risks": [],
+      "payload": {
+        "request_line": "POST http://example.com/api/data HTTP/1.1",
+        "headers": [
+          ["Host", "example.com"],
+          ["Content-Type", "application/json"],
+          ["Content-Length", "27"]
+        ],
+        "body": "{\"user\":\"alice\",\"role\":\"admin\"}",
+        "body_is_binary": false,
+        "body_truncated": false
+      }
     },
     {
       "timestamp": "2026-03-03T21:55:13.953356+00:00",
@@ -65,7 +96,17 @@ Returns paginated, filterable proxy log entries.
           "severity": "MEDIUM",
           "description": "Sensitive data in URL: password="
         }
-      ]
+      ],
+      "payload": {
+        "request_line": "GET http://example.com/?password=secret HTTP/1.1",
+        "headers": [
+          ["Host", "example.com"],
+          ["User-Agent", "curl/8.11.1"]
+        ],
+        "body": "",
+        "body_is_binary": false,
+        "body_truncated": false
+      }
     }
   ]
 }
@@ -75,15 +116,16 @@ Returns paginated, filterable proxy log entries.
 
 Each entry in the JSONL file (and in API responses) has the following fields:
 
-| Field         | Type     | Description                                    |
-|---------------|----------|------------------------------------------------|
-| `timestamp`   | string   | ISO 8601 timestamp (UTC)                       |
-| `client_ip`   | string   | Client IP address                              |
-| `client_port` | int      | Client source port                             |
-| `method`      | string   | HTTP method (`GET`, `POST`, `CONNECT`, etc.)   |
-| `target`      | string   | Full request URL or `host:port` for CONNECT    |
-| `status`      | string   | Result status (`200`, `502`, `MITM`, etc.)     |
-| `risks`       | Risk[]   | Detected security risks (may be empty)         |
+| Field         | Type      | Description                                    |
+|---------------|-----------|------------------------------------------------|
+| `timestamp`   | string    | ISO 8601 timestamp (UTC)                       |
+| `client_ip`   | string    | Client IP address                              |
+| `client_port` | int       | Client source port                             |
+| `method`      | string    | HTTP method (`GET`, `POST`, `CONNECT`, etc.)   |
+| `target`      | string    | Full request URL or `host:port` for CONNECT    |
+| `status`      | string    | Result status (`200`, `502`, `MITM`, etc.)     |
+| `risks`       | Risk[]    | Detected security risks (may be empty)         |
+| `payload`     | Payload?  | Request payload, if available (absent for CONNECT without MITM) |
 
 ### Risk Object
 
@@ -91,6 +133,16 @@ Each entry in the JSONL file (and in API responses) has the following fields:
 |---------------|--------|------------------------------------|
 | `severity`    | string | `HIGH`, `MEDIUM`, or `LOW`         |
 | `description` | string | Human-readable risk description    |
+
+### Payload Object
+
+| Field            | Type               | Description                                        |
+|------------------|--------------------|----------------------------------------------------|
+| `request_line`   | string             | Full HTTP request line (e.g., `GET http://... HTTP/1.1`) |
+| `headers`        | [string, string][] | Header name-value pairs                            |
+| `body`           | string             | Request body text, or base64-encoded if binary     |
+| `body_is_binary` | boolean            | `true` if body is base64-encoded binary content    |
+| `body_truncated` | boolean            | `true` if body was truncated at 8 KB               |
 
 ## Status Values
 
