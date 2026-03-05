@@ -135,4 +135,5 @@ def make_server_ctx(cert_path):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=cert_path)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.set_alpn_protocols(["http/1.1"])
     return ctx
