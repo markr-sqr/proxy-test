@@ -1,7 +1,7 @@
 services:
   proxy:
     build: .
-    user: "${PROXY_UID:-1000}:${PROXY_GID:-1000}"
+    user: "${PROXY_UID:-1001}:${PROXY_GID:-972}"
     ports:
       - "${PROXY_PORT:-8080}:8080"
       - "${VIEWER_PORT:-9999}:9999"

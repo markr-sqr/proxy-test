@@ -11,6 +11,14 @@ export interface Payload {
   body_truncated: boolean;
 }
 
+export interface ResponsePayload {
+  status_line: string;
+  headers: [string, string][];
+  body: string;
+  body_is_binary: boolean;
+  body_truncated: boolean;
+}
+
 export interface LogEntry {
   timestamp: string;
   client_ip: string;
@@ -20,6 +28,7 @@ export interface LogEntry {
   status: string;
   risks: Risk[];
   payload?: Payload;
+  response?: ResponsePayload;
 }
 
 export interface LogQuery {

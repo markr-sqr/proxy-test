@@ -19,9 +19,9 @@
   }
 
   .container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 20px;
+    max-width: 100%;
+    margin: 0;
+    padding: 12px 20px;
   }
 
   header {
@@ -73,6 +73,15 @@
     gap: 4px;
   }
 
+  .filter-group-url {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .filter-group-url input {
+    width: 100% !important;
+  }
+
   .filter-group label {
     font-size: 11px;
     color: #8b949e;
@@ -88,7 +97,7 @@
     border-radius: 4px;
     font-family: inherit;
     font-size: 13px;
-    width: 140px;
+    min-width: 140px;
   }
 
   .filter-group input:focus, .filter-group select:focus {
@@ -130,7 +139,7 @@
 
   /* Table */
   .table-wrap {
-    overflow-x: auto;
+    overflow-x: hidden;
     border: 1px solid #21262d;
     border-radius: 6px;
   }
@@ -138,7 +147,7 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 900px;
+    table-layout: fixed;
   }
 
   thead th {
@@ -153,7 +162,38 @@
     position: sticky;
     top: 0;
     white-space: nowrap;
+    overflow: hidden;
+    user-select: none;
   }
+
+  thead th.sortable {
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  thead th.sortable:hover { color: #c9d1d9; }
+
+  thead th .sort-arrow {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 10px;
+    color: #484f58;
+    vertical-align: middle;
+  }
+
+  thead th.sort-asc .sort-arrow,
+  thead th.sort-desc .sort-arrow {
+    color: #58a6ff;
+  }
+
+  /* Column widths for full-width layout */
+  th:nth-child(1) { width: 200px; }  /* Timestamp */
+  th:nth-child(2) { width: 150px; }  /* Client */
+  th:nth-child(3) { width: 180px; }  /* Method + content-type badge */
+  th:nth-child(4) { width: auto; }   /* Target — takes remaining space */
+  th:nth-child(5) { width: 80px; }   /* Status */
+  th:nth-child(6) { width: 120px; }  /* Risks */
+  th:nth-child(7) { width: 40px; }   /* Scope action */
 
   tbody tr {
     cursor: pointer;
@@ -168,6 +208,8 @@
     padding: 8px 14px;
     border-bottom: 1px solid #21262d;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Expanded detail row */
@@ -400,15 +442,474 @@
     padding: 40px;
     color: #484f58;
   }
+
+  /* Header controls */
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .settings-btn {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .settings-btn:hover {
+    background: #30363d;
+    color: #e6edf3;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .modal-overlay.open {
+    display: flex;
+  }
+
+  .modal {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    width: 460px;
+    max-width: 90vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .modal-header h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #e6edf3;
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    color: #8b949e;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  }
+
+  .modal-close:hover { color: #e6edf3; }
+
+  .modal-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .setting-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .setting-group-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #e6edf3;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+  }
+
+  .setting-label {
+    font-size: 13px;
+    color: #c9d1d9;
+  }
+
+  .setting-hint {
+    font-size: 11px;
+    color: #484f58;
+  }
+
+  .setting-row input[type="number"],
+  .setting-row select {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    width: 100px;
+  }
+
+  .setting-row input:focus,
+  .setting-row select:focus {
+    outline: none;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.15);
+  }
+
+  .setting-row input[type="text"].log-path-input {
+    width: 100%;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid #21262d;
+  }
+
+  /* Compact view */
+  .compact-view tbody td { padding: 4px 10px; }
+  .compact-view thead th { padding: 6px 10px; }
+  .compact-view .method-pill { padding: 1px 6px; font-size: 10px; }
+
+  /* Dashboard modal — large */
+  .modal-large {
+    width: 900px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .dash-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .dash-card {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 14px;
+  }
+
+  .dash-card-full { grid-column: 1 / -1; }
+
+  .dash-card-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+
+  /* Stat number */
+  .dash-stat-row {
+    display: flex;
+    justify-content: space-around;
+    text-align: center;
+    gap: 12px;
+  }
+
+  .dash-stat { flex: 1; }
+
+  .dash-stat-val {
+    font-size: 28px;
+    font-weight: 700;
+    color: #e6edf3;
+    line-height: 1.2;
+  }
+
+  .dash-stat-label {
+    font-size: 11px;
+    color: #484f58;
+    margin-top: 2px;
+  }
+
+  /* Horizontal bar chart */
+  .dash-bar-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .dash-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .dash-bar-label {
+    width: 90px;
+    text-align: right;
+    color: #8b949e;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dash-bar-track {
+    flex: 1;
+    height: 18px;
+    background: #161b22;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .dash-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+    min-width: 2px;
+  }
+
+  .dash-bar-count {
+    width: 40px;
+    text-align: right;
+    color: #c9d1d9;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  /* Target bar — wider label */
+  .dash-bar-row.target-row .dash-bar-label {
+    width: 220px;
+  }
+
+  /* Timeline chart */
+  .dash-timeline {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 100px;
+    padding-top: 4px;
+  }
+
+  .dash-timeline-bar {
+    flex: 1;
+    background: #58a6ff;
+    border-radius: 2px 2px 0 0;
+    min-width: 4px;
+    position: relative;
+    transition: height 0.3s;
+  }
+
+  .dash-timeline-bar:hover {
+    background: #79c0ff;
+  }
+
+  .dash-timeline-bar:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #30363d;
+    color: #e6edf3;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    white-space: nowrap;
+    pointer-events: none;
+    margin-bottom: 4px;
+  }
+
+  .dash-timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: #484f58;
+    margin-top: 4px;
+  }
+
+  /* Method colors for bars */
+  .bar-GET { background: #238636; }
+  .bar-POST { background: #1f6feb; }
+  .bar-PUT { background: #9e6a03; }
+  .bar-DELETE { background: #da3633; }
+  .bar-PATCH { background: #8957e5; }
+  .bar-CONNECT { background: #6e40c9; }
+  .bar-HEAD { background: #484f58; }
+  .bar-OPTIONS { background: #484f58; }
+
+  /* Status colors */
+  .bar-2xx { background: #238636; }
+  .bar-3xx { background: #1f6feb; }
+  .bar-4xx { background: #9e6a03; }
+  .bar-5xx { background: #da3633; }
+  .bar-other { background: #484f58; }
+
+  /* Severity colors */
+  .bar-HIGH { background: #da3633; }
+  .bar-MEDIUM { background: #9e6a03; }
+  .bar-LOW { background: #1b7c83; }
+
+  .dash-empty {
+    color: #484f58;
+    font-size: 12px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  /* Scope modal */
+  .scope-textarea {
+    width: 100%;
+    min-height: 160px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+    line-height: 1.6;
+  }
+
+  .scope-textarea:focus {
+    outline: none;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.15);
+  }
+
+  .scope-status {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+
+  .scope-status.active {
+    background: #1b4332;
+    color: #52c41a;
+  }
+
+  .scope-status.all {
+    background: #1c2128;
+    color: #8b949e;
+  }
+
+  .scope-btn {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: background 0.15s, color 0.15s;
+    position: relative;
+  }
+
+  .scope-btn:hover { background: #30363d; color: #e6edf3; }
+
+  .scope-btn.has-scope {
+    border-color: #238636;
+    color: #3fb950;
+  }
+
+  /* Inline scope-add button in table rows */
+  .scope-add-btn {
+    background: none;
+    border: 1px solid #30363d;
+    color: #484f58;
+    width: 24px;
+    height: 24px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .scope-add-btn:hover {
+    color: #3fb950;
+    border-color: #238636;
+  }
+
+  /* Quick-add scope modal (small) */
+  .modal-small {
+    width: 400px;
+    max-width: 90vw;
+  }
+
+  .scope-add-input {
+    width: 100%;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 14px;
+  }
+
+  .scope-add-input:focus {
+    outline: none;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.15);
+  }
+
+  .scope-add-preview {
+    font-size: 11px;
+    color: #8b949e;
+    margin-top: 6px;
+  }
 </style>
 </head>
 <body>
 <div class="container">
   <header>
     <h1>Proxy Log Viewer</h1>
-    <div class="auto-refresh">
-      <input type="checkbox" id="auto-refresh">
-      <label for="auto-refresh">Auto-refresh (5s)</label>
+    <div class="header-controls">
+      <div class="auto-refresh">
+        <input type="checkbox" id="auto-refresh">
+        <label for="auto-refresh" id="auto-refresh-label">Auto-refresh (5s)</label>
+      </div>
+      <button class="scope-btn" id="scope-btn" title="Scope">&#9678;</button>
+      <button class="settings-btn" id="dashboard-btn" title="Dashboard">&#9776;</button>
+      <button class="settings-btn" id="settings-btn" title="Settings">&#9881;</button>
     </div>
   </header>
 
@@ -427,7 +928,7 @@
         <option>OPTIONS</option>
       </select>
     </div>
-    <div class="filter-group">
+    <div class="filter-group filter-group-url">
       <label for="f-url">URL</label>
       <input type="text" id="f-url" placeholder="e.g. example.com">
     </div>
@@ -458,16 +959,17 @@
     <table>
       <thead>
         <tr>
-          <th>Timestamp</th>
-          <th>Client</th>
-          <th>Method</th>
-          <th>Target</th>
-          <th>Status</th>
-          <th>Risks</th>
+          <th class="sortable" data-sort="timestamp">Timestamp<span class="sort-arrow">&#9650;</span></th>
+          <th class="sortable" data-sort="client">Client<span class="sort-arrow">&#9650;</span></th>
+          <th class="sortable" data-sort="method">Method<span class="sort-arrow">&#9650;</span></th>
+          <th class="sortable" data-sort="target">Target<span class="sort-arrow">&#9650;</span></th>
+          <th class="sortable" data-sort="status">Status<span class="sort-arrow">&#9650;</span></th>
+          <th class="sortable" data-sort="risks">Risks<span class="sort-arrow">&#9650;</span></th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="log-body">
-        <tr><td colspan="6" class="empty-state">Loading...</td></tr>
+        <tr><td colspan="7" class="empty-state">Loading...</td></tr>
       </tbody>
     </table>
   </div>
@@ -479,12 +981,214 @@
   </div>
 </div>
 
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <div class="setting-group-title">Auto-Refresh</div>
+          <div class="setting-row">
+            <span class="setting-label">Interval (seconds)</span>
+            <input type="number" id="s-refresh-interval" min="1" max="300" value="5">
+          </div>
+          <div class="setting-hint">Set the auto-refresh polling interval. Applies when auto-refresh is enabled.</div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-group-title">Display</div>
+          <div class="setting-row">
+            <span class="setting-label">Font size</span>
+            <select id="s-font-size">
+              <option value="11">11px</option>
+              <option value="12">12px</option>
+              <option value="13" selected>13px (default)</option>
+              <option value="14">14px</option>
+              <option value="15">15px</option>
+              <option value="16">16px</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Rows per page</span>
+            <input type="number" id="s-rows-per-page" min="10" max="500" value="50">
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">Compact view</span>
+            <select id="s-compact">
+              <option value="off">Off (default)</option>
+              <option value="on">On</option>
+            </select>
+          </div>
+          <div class="setting-hint">Compact view reduces row padding for denser display.</div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-group-title">Log File</div>
+          <div class="setting-row" style="flex-direction:column;align-items:stretch;">
+            <input type="text" class="log-path-input" id="s-log-path" value="/tmp/proxy.log" readonly>
+          </div>
+          <div class="setting-hint">Log file path is configured server-side (read-only).</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="settings-reset">Reset Defaults</button>
+        <button class="btn btn-primary" id="settings-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="dashboard-modal">
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <h2>Dashboard</h2>
+        <button class="modal-close" id="dash-close">&times;</button>
+      </div>
+      <div class="modal-body" id="dash-body">
+        <div class="dash-empty">Loading statistics...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="scope-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Scope</h2>
+        <button class="modal-close" id="scope-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <div class="setting-group-title">Target Wildcards</div>
+          <textarea class="scope-textarea" id="scope-patterns" placeholder="*" spellcheck="false"></textarea>
+          <div class="setting-hint">One pattern per line. Use <code>*</code> as wildcard.<br>
+            Examples: <code>*.example.com</code>, <code>api.*.io</code>, <code>192.168.*</code><br>
+            Leave empty or <code>*</code> alone to show all targets.</div>
+        </div>
+        <div>
+          <span class="scope-status" id="scope-status"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="scope-reset">Reset (All)</button>
+        <button class="btn btn-primary" id="scope-save">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="scope-add-modal">
+    <div class="modal modal-small">
+      <div class="modal-header">
+        <h2>Add to Scope</h2>
+        <button class="modal-close" id="scope-add-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <div class="setting-group-title">Target Pattern</div>
+          <input type="text" class="scope-add-input" id="scope-add-input" spellcheck="false">
+          <div class="scope-add-preview" id="scope-add-preview"></div>
+          <div class="setting-hint">Edit the pattern before adding. Use <code>*</code> as wildcard.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="scope-add-cancel">Cancel</button>
+        <button class="btn btn-primary" id="scope-add-submit">Add to Scope</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 (function() {
-  const LIMIT = 50;
+  /* Settings management */
+  var DEFAULTS = { refreshInterval: 5, fontSize: 13, rowsPerPage: 50, compact: false };
+
+  function loadSettings() {
+    try {
+      var saved = JSON.parse(localStorage.getItem('proxyViewerSettings'));
+      return Object.assign({}, DEFAULTS, saved);
+    } catch(e) { return Object.assign({}, DEFAULTS); }
+  }
+
+  function saveSettings(s) {
+    localStorage.setItem('proxyViewerSettings', JSON.stringify(s));
+  }
+
+  var settings = loadSettings();
+  var limit = settings.rowsPerPage;
   let currentPage = 1;
   let totalEntries = 0;
   let refreshTimer = null;
+  var refreshInterval = settings.refreshInterval * 1000;
+
+  /* Sort state */
+  var sortColumn = null;  // null = default server order
+  var sortDir = 'asc';    // 'asc' or 'desc'
+
+  function applySettings() {
+    document.body.style.fontSize = settings.fontSize + 'px';
+    if (settings.compact) {
+      document.body.classList.add('compact-view');
+    } else {
+      document.body.classList.remove('compact-view');
+    }
+    limit = settings.rowsPerPage;
+    refreshInterval = settings.refreshInterval * 1000;
+    document.getElementById('auto-refresh-label').textContent =
+      'Auto-refresh (' + settings.refreshInterval + 's)';
+    // Restart timer if running
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = setInterval(fetchLogs, refreshInterval);
+    }
+  }
+
+  applySettings();
+
+  /* Scope management */
+  function loadScope() {
+    try {
+      var s = JSON.parse(localStorage.getItem('proxyViewerScope'));
+      return Array.isArray(s) ? s : ['*'];
+    } catch(e) { return ['*']; }
+  }
+
+  function saveScope(patterns) {
+    localStorage.setItem('proxyViewerScope', JSON.stringify(patterns));
+  }
+
+  function wildcardToRegex(pattern) {
+    var esc = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    esc = esc.replace(/\*/g, '.*').replace(/\?/g, '.');
+    return new RegExp('^' + esc + '$', 'i');
+  }
+
+  function isScopeAll(patterns) {
+    return patterns.length === 0 || (patterns.length === 1 && patterns[0] === '*');
+  }
+
+  function matchesScope(target, patterns) {
+    if (isScopeAll(patterns)) return true;
+    var host = target.replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+    for (var i = 0; i < patterns.length; i++) {
+      try {
+        if (wildcardToRegex(patterns[i]).test(host) || wildcardToRegex(patterns[i]).test(target)) return true;
+      } catch(e) {}
+    }
+    return false;
+  }
+
+  var scopePatterns = loadScope();
+
+  function updateScopeBtn() {
+    var btn = document.getElementById('scope-btn');
+    if (isScopeAll(scopePatterns)) {
+      btn.classList.remove('has-scope');
+      btn.title = 'Scope (all targets)';
+    } else {
+      btn.classList.add('has-scope');
+      btn.title = 'Scope (' + scopePatterns.length + ' pattern' + (scopePatterns.length !== 1 ? 's' : '') + ')';
+    }
+  }
+
+  updateScopeBtn();
 
   const $body      = document.getElementById('log-body');
   const $summary   = document.getElementById('summary');
@@ -734,7 +1438,62 @@
       html += '</div>';
     }
 
-    if ((!entry.risks || entry.risks.length === 0) && !p) {
+    // Response payload section
+    var r = entry.response;
+    if (r) {
+      html += '<div><div class="detail-section-title">Response</div>';
+      html += '<div class="payload-request-line" style="color:#3fb950;">' + escapeHtml(r.status_line) + '</div>';
+
+      if (r.headers && r.headers.length > 0) {
+        html += '<div class="payload-headers">';
+        r.headers.forEach(function(h) {
+          html += '<div class="payload-header-row"><span>' + escapeHtml(h[0]) + ':</span><span>' + escapeHtml(h[1]) + '</span></div>';
+        });
+        html += '</div>';
+      }
+
+      if (r.body) {
+        // Check for image response
+        var respCt = '';
+        if (r.headers) {
+          for (var ri = 0; ri < r.headers.length; ri++) {
+            if (r.headers[ri][0].toLowerCase() === 'content-type') { respCt = r.headers[ri][1]; break; }
+          }
+        }
+        var respIsImage = respCt && respCt.split(';')[0].trim().indexOf('image/') === 0;
+
+        if (respIsImage && r.body_is_binary) {
+          var respMime = respCt.split(';')[0].trim();
+          html += '<div style="margin-top:8px"><div class="detail-section-title">Response Image</div>';
+          html += '<div class="payload-image-preview">' +
+                  '<img src="data:' + escapeHtml(respMime) + ';base64,' + escapeHtml(r.body) + '" alt="Response image">' +
+                  '</div></div>';
+        }
+
+        html += '<div style="margin-top:8px"><div class="detail-section-title">Response Body' +
+                (r.body_is_binary ? ' (binary, base64-encoded)' : '') + '</div>';
+        html += '<div class="payload-body">' + escapeHtml(r.body) + '</div>';
+        if (r.body_truncated) {
+          html += '<div class="payload-body-note">Body truncated to 8 KB</div>';
+        }
+        html += '</div>';
+
+        // Decoded response data
+        var respDecodings = tryDecodeEncodings(r.body, r.body_is_binary);
+        if (respDecodings.length > 0) {
+          html += '<div style="margin-top:8px"><div class="detail-section-title">Response Decoded Data</div>';
+          respDecodings.forEach(function(d) {
+            html += '<div class="decoded-section">' +
+                    '<div class="decoded-label">' + escapeHtml(d.label) + '</div>' +
+                    '<div class="decoded-content">' + escapeHtml(d.decoded) + '</div></div>';
+          });
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+    }
+
+    if ((!entry.risks || entry.risks.length === 0) && !p && !r) {
       html += '<div style="color:#484f58">No risks detected. No payload captured.</div>';
     }
 
@@ -744,23 +1503,92 @@
     return tr;
   }
 
+  function getSortValue(entry, col) {
+    switch (col) {
+      case 'timestamp': return entry.timestamp || '';
+      case 'client': return (entry.client_ip || '') + ':' + (entry.client_port || '');
+      case 'method': return entry.method || '';
+      case 'target': return entry.target || '';
+      case 'status': return entry.status || '';
+      case 'risks': return entry.risks ? entry.risks.length : 0;
+      default: return '';
+    }
+  }
+
+  function sortEntries(entries) {
+    if (!sortColumn) return entries;
+    var sorted = entries.slice();
+    var dir = sortDir === 'asc' ? 1 : -1;
+    sorted.sort(function(a, b) {
+      var va = getSortValue(a, sortColumn);
+      var vb = getSortValue(b, sortColumn);
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      va = String(va).toLowerCase();
+      vb = String(vb).toLowerCase();
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+    return sorted;
+  }
+
+  function updateSortHeaders() {
+    var ths = document.querySelectorAll('thead th.sortable');
+    ths.forEach(function(th) {
+      var col = th.getAttribute('data-sort');
+      th.classList.remove('sort-asc', 'sort-desc');
+      var arrow = th.querySelector('.sort-arrow');
+      if (col === sortColumn) {
+        th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+        arrow.innerHTML = sortDir === 'asc' ? '&#9650;' : '&#9660;';
+      } else {
+        arrow.innerHTML = '&#9650;';
+      }
+    });
+  }
+
+  document.querySelector('thead tr').addEventListener('click', function(e) {
+    var th = e.target.closest('th.sortable');
+    if (!th) return;
+    var col = th.getAttribute('data-sort');
+    if (sortColumn === col) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortColumn = col;
+      sortDir = 'asc';
+    }
+    updateSortHeaders();
+    fetchLogs();
+  });
+
   function render(data) {
     totalEntries = data.total;
     var entries = data.entries;
+
+    // Apply scope filter client-side
+    if (!isScopeAll(scopePatterns)) {
+      entries = entries.filter(function(e) { return matchesScope(e.target, scopePatterns); });
+    }
+
+    // Apply sort
+    entries = sortEntries(entries);
+
     var start = (data.page - 1) * data.limit + 1;
     var end = Math.min(data.page * data.limit, data.total);
     var totalPages = Math.max(1, Math.ceil(data.total / data.limit));
 
+    var scopeNote = isScopeAll(scopePatterns) ? '' : ' (scope: ' + entries.length + ' matched)';
     if (data.total === 0) {
       $summary.textContent = 'No entries found.';
     } else {
-      $summary.textContent = 'Showing ' + start + '\u2013' + end + ' of ' + data.total + ' entries';
+      $summary.textContent = 'Showing ' + start + '\u2013' + end + ' of ' + data.total + ' entries' + scopeNote;
     }
 
     $body.innerHTML = '';
 
     if (entries.length === 0) {
-      $body.innerHTML = '<tr><td colspan="6" class="empty-state">No log entries match your filters.</td></tr>';
+      var msg = isScopeAll(scopePatterns) ? 'No log entries match your filters.' : 'No entries match your filters and scope.';
+      $body.innerHTML = '<tr><td colspan="7" class="empty-state">' + msg + '</td></tr>';
       $pagination.style.display = 'none';
       return;
     }
@@ -775,14 +1603,21 @@
         '<td>' + escapeHtml(entry.target) + '</td>' +
         '<td><span class="' + statusClass(entry.status) + '">' +
              escapeHtml(entry.status) + '</span></td>' +
-        '<td>' + renderRiskBadges(entry.risks) + '</td>';
+        '<td>' + renderRiskBadges(entry.risks) + '</td>' +
+        '<td><button class="scope-add-btn" title="Add to scope">+</button></td>';
+
+      var scopeBtn = tr.querySelector('.scope-add-btn');
+      scopeBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        openScopeAdd(entry.target);
+      });
 
       tr.addEventListener('click', function() {
         var next = tr.nextElementSibling;
         if (next && next.classList.contains('detail-row')) {
           next.remove();
         } else {
-          var detail = renderDetailRow(entry, 6);
+          var detail = renderDetailRow(entry, 7);
           tr.parentNode.insertBefore(detail, tr.nextSibling);
         }
       });
@@ -799,13 +1634,13 @@
   function fetchLogs() {
     var params = getFilters();
     params.set('page', String(currentPage));
-    params.set('limit', String(LIMIT));
+    params.set('limit', String(limit));
 
     fetch('/api/logs?' + params.toString())
       .then(function(res) { return res.json(); })
       .then(render)
       .catch(function(err) {
-        $body.innerHTML = '<tr><td colspan="6" class="empty-state">Error loading logs: ' +
+        $body.innerHTML = '<tr><td colspan="7" class="empty-state">Error loading logs: ' +
                           escapeHtml(String(err)) + '</td></tr>';
       });
   }
@@ -831,17 +1666,418 @@
   });
 
   $nextBtn.addEventListener('click', function() {
-    var totalPages = Math.ceil(totalEntries / LIMIT);
+    var totalPages = Math.ceil(totalEntries / limit);
     if (currentPage < totalPages) { currentPage++; fetchLogs(); }
   });
 
   $autoRef.addEventListener('change', function() {
     if ($autoRef.checked) {
-      refreshTimer = setInterval(fetchLogs, 5000);
+      refreshTimer = setInterval(fetchLogs, refreshInterval);
     } else {
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
+  });
+
+  /* Settings modal */
+  var $modal = document.getElementById('settings-modal');
+  var $settingsBtn = document.getElementById('settings-btn');
+  var $modalClose = document.getElementById('modal-close');
+  var $settingsSave = document.getElementById('settings-save');
+  var $settingsReset = document.getElementById('settings-reset');
+
+  function populateModal() {
+    document.getElementById('s-refresh-interval').value = settings.refreshInterval;
+    document.getElementById('s-font-size').value = settings.fontSize;
+    document.getElementById('s-rows-per-page').value = settings.rowsPerPage;
+    document.getElementById('s-compact').value = settings.compact ? 'on' : 'off';
+  }
+
+  function openModal() {
+    populateModal();
+    $modal.classList.add('open');
+  }
+
+  function closeModal() {
+    $modal.classList.remove('open');
+  }
+
+  $settingsBtn.addEventListener('click', openModal);
+  $modalClose.addEventListener('click', closeModal);
+  $modal.addEventListener('click', function(e) {
+    if (e.target === $modal) closeModal();
+  });
+
+  $settingsSave.addEventListener('click', function() {
+    var ri = parseInt(document.getElementById('s-refresh-interval').value, 10);
+    var fs = parseInt(document.getElementById('s-font-size').value, 10);
+    var rpp = parseInt(document.getElementById('s-rows-per-page').value, 10);
+    var compact = document.getElementById('s-compact').value === 'on';
+
+    settings.refreshInterval = (ri >= 1 && ri <= 300) ? ri : DEFAULTS.refreshInterval;
+    settings.fontSize = fs || DEFAULTS.fontSize;
+    settings.rowsPerPage = (rpp >= 10 && rpp <= 500) ? rpp : DEFAULTS.rowsPerPage;
+    settings.compact = compact;
+
+    saveSettings(settings);
+    applySettings();
+    currentPage = 1;
+    fetchLogs();
+    closeModal();
+  });
+
+  $settingsReset.addEventListener('click', function() {
+    settings = Object.assign({}, DEFAULTS);
+    saveSettings(settings);
+    applySettings();
+    populateModal();
+    currentPage = 1;
+    fetchLogs();
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      if ($scopeAddModal.classList.contains('open')) closeScopeAdd();
+      else if ($scopeModal.classList.contains('open')) closeScope();
+      else if ($dashModal.classList.contains('open')) closeDash();
+      else if ($modal.classList.contains('open')) closeModal();
+    }
+  });
+
+  /* Dashboard */
+  var $dashModal = document.getElementById('dashboard-modal');
+  var $dashBtn = document.getElementById('dashboard-btn');
+  var $dashClose = document.getElementById('dash-close');
+  var $dashBody = document.getElementById('dash-body');
+
+  function closeDash() { $dashModal.classList.remove('open'); }
+
+  $dashBtn.addEventListener('click', function() {
+    $dashModal.classList.add('open');
+    $dashBody.innerHTML = '<div class="dash-empty">Loading statistics...</div>';
+    fetch('/api/logs?page=1&limit=10000')
+      .then(function(r) { return r.json(); })
+      .then(function(data) { renderDashboard(data.entries, data.total); })
+      .catch(function(e) {
+        $dashBody.innerHTML = '<div class="dash-empty">Error loading data: ' + escapeHtml(String(e)) + '</div>';
+      });
+  });
+
+  $dashClose.addEventListener('click', closeDash);
+  $dashModal.addEventListener('click', function(e) {
+    if (e.target === $dashModal) closeDash();
+  });
+
+  function renderBarChart(items, colorPrefix) {
+    if (items.length === 0) return '<div class="dash-empty">No data</div>';
+    var max = items[0].count;
+    var html = '<div class="dash-bar-list">';
+    items.forEach(function(it) {
+      var pct = max > 0 ? (it.count / max * 100) : 0;
+      var cls = colorPrefix ? 'dash-bar-fill bar-' + it.key : 'dash-bar-fill';
+      var style = colorPrefix ? '' : 'background:#58a6ff;';
+      html += '<div class="dash-bar-row' + (it.isTarget ? ' target-row' : '') + '">' +
+              '<span class="dash-bar-label" title="' + escapeHtml(it.label) + '">' + escapeHtml(it.label) + '</span>' +
+              '<div class="dash-bar-track"><div class="' + cls + '" style="width:' + pct + '%;' + style + '"></div></div>' +
+              '<span class="dash-bar-count">' + it.count + '</span></div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderTimeline(entries) {
+    if (entries.length === 0) return '<div class="dash-empty">No data</div>';
+
+    // Group by time buckets
+    var timestamps = entries.map(function(e) { return new Date(e.timestamp).getTime(); }).filter(function(t) { return !isNaN(t); });
+    if (timestamps.length === 0) return '<div class="dash-empty">No valid timestamps</div>';
+
+    timestamps.sort(function(a, b) { return a - b; });
+    var minT = timestamps[0];
+    var maxT = timestamps[timestamps.length - 1];
+    var range = maxT - minT;
+
+    // Pick bucket count: aim for ~30 bars max
+    var bucketCount = Math.min(30, Math.max(1, entries.length));
+    if (range === 0) bucketCount = 1;
+    var bucketSize = range / bucketCount || 1;
+
+    var buckets = [];
+    for (var i = 0; i < bucketCount; i++) buckets.push({ start: minT + i * bucketSize, count: 0 });
+
+    timestamps.forEach(function(t) {
+      var idx = Math.min(Math.floor((t - minT) / bucketSize), bucketCount - 1);
+      buckets[idx].count++;
+    });
+
+    var maxCount = Math.max.apply(null, buckets.map(function(b) { return b.count; }));
+
+    var html = '<div class="dash-timeline">';
+    buckets.forEach(function(b) {
+      var h = maxCount > 0 ? (b.count / maxCount * 100) : 0;
+      var time = new Date(b.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      html += '<div class="dash-timeline-bar" style="height:' + Math.max(h, 2) + '%;" data-tip="' + time + ': ' + b.count + ' req"></div>';
+    });
+    html += '</div>';
+    html += '<div class="dash-timeline-labels">' +
+            '<span>' + new Date(minT).toLocaleString() + '</span>' +
+            '<span>' + new Date(maxT).toLocaleString() + '</span></div>';
+    return html;
+  }
+
+  function renderDashboard(entries, total) {
+    // Compute stats
+    var methodCounts = {};
+    var statusCounts = {};
+    var riskCounts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+    var targetCounts = {};
+    var totalRisks = 0;
+    var clients = {};
+
+    entries.forEach(function(e) {
+      // Methods
+      var m = e.method || 'UNKNOWN';
+      methodCounts[m] = (methodCounts[m] || 0) + 1;
+
+      // Status groups
+      var s = e.status;
+      var sg;
+      var code = parseInt(s, 10);
+      if (code >= 200 && code < 300) sg = '2xx';
+      else if (code >= 300 && code < 400) sg = '3xx';
+      else if (code >= 400 && code < 500) sg = '4xx';
+      else if (code >= 500) sg = '5xx';
+      else sg = 'other';
+      statusCounts[sg] = (statusCounts[sg] || 0) + 1;
+
+      // Risks
+      if (e.risks && e.risks.length > 0) {
+        totalRisks += e.risks.length;
+        e.risks.forEach(function(r) {
+          if (riskCounts[r.severity] !== undefined) riskCounts[r.severity]++;
+        });
+      }
+
+      // Targets (hostname only)
+      var target = e.target || '';
+      var host = target.replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+      if (host) targetCounts[host] = (targetCounts[host] || 0) + 1;
+
+      // Unique clients
+      clients[e.client_ip] = true;
+    });
+
+    // Sort methods
+    var methods = Object.keys(methodCounts).map(function(k) {
+      return { key: k, label: k, count: methodCounts[k] };
+    }).sort(function(a, b) { return b.count - a.count; });
+
+    // Sort targets, top 10
+    var targets = Object.keys(targetCounts).map(function(k) {
+      return { key: k, label: k, count: targetCounts[k], isTarget: true };
+    }).sort(function(a, b) { return b.count - a.count; }).slice(0, 10);
+
+    // Status
+    var statuses = ['2xx','3xx','4xx','5xx','other'].filter(function(k) {
+      return statusCounts[k] > 0;
+    }).map(function(k) {
+      return { key: k, label: k.toUpperCase(), count: statusCounts[k] };
+    }).sort(function(a, b) { return b.count - a.count; });
+
+    // Risks
+    var risks = ['HIGH','MEDIUM','LOW'].filter(function(k) {
+      return riskCounts[k] > 0;
+    }).map(function(k) {
+      return { key: k, label: k, count: riskCounts[k] };
+    });
+
+    var uniqueClients = Object.keys(clients).length;
+
+    // Build HTML
+    var html = '';
+
+    // Summary stats row
+    html += '<div class="dash-card dash-card-full"><div class="dash-stat-row">';
+    html += '<div class="dash-stat"><div class="dash-stat-val">' + total + '</div><div class="dash-stat-label">Total Requests</div></div>';
+    html += '<div class="dash-stat"><div class="dash-stat-val">' + uniqueClients + '</div><div class="dash-stat-label">Unique Clients</div></div>';
+    html += '<div class="dash-stat"><div class="dash-stat-val">' + totalRisks + '</div><div class="dash-stat-label">Security Risks</div></div>';
+    html += '<div class="dash-stat"><div class="dash-stat-val">' + targets.length + '</div><div class="dash-stat-label">Unique Hosts</div></div>';
+    html += '</div></div>';
+
+    // Grid
+    html += '<div class="dash-grid">';
+
+    // Traffic over time (full width)
+    html += '<div class="dash-card dash-card-full"><div class="dash-card-title">Traffic Over Time</div>';
+    html += renderTimeline(entries);
+    html += '</div>';
+
+    // Methods
+    html += '<div class="dash-card"><div class="dash-card-title">Requests by Method</div>';
+    html += renderBarChart(methods, true);
+    html += '</div>';
+
+    // Status codes
+    html += '<div class="dash-card"><div class="dash-card-title">Status Codes</div>';
+    html += renderBarChart(statuses, true);
+    html += '</div>';
+
+    // Top targets (full width)
+    html += '<div class="dash-card dash-card-full"><div class="dash-card-title">Top 10 Targets</div>';
+    html += renderBarChart(targets, false);
+    html += '</div>';
+
+    // Risks
+    html += '<div class="dash-card"><div class="dash-card-title">Risk Severity</div>';
+    if (risks.length > 0) {
+      html += renderBarChart(risks, true);
+    } else {
+      html += '<div class="dash-empty">No risks detected</div>';
+    }
+    html += '</div>';
+
+    // Risk per method
+    html += '<div class="dash-card"><div class="dash-card-title">Risky Requests</div>';
+    var riskyMethods = {};
+    entries.forEach(function(e) {
+      if (e.risks && e.risks.length > 0) {
+        var m = e.method || 'UNKNOWN';
+        riskyMethods[m] = (riskyMethods[m] || 0) + 1;
+      }
+    });
+    var riskyList = Object.keys(riskyMethods).map(function(k) {
+      return { key: k, label: k, count: riskyMethods[k] };
+    }).sort(function(a, b) { return b.count - a.count; });
+    if (riskyList.length > 0) {
+      html += renderBarChart(riskyList, true);
+    } else {
+      html += '<div class="dash-empty">No risky requests</div>';
+    }
+    html += '</div>';
+
+    html += '</div>'; // close grid
+
+    $dashBody.innerHTML = html;
+  }
+
+  /* Scope modal */
+  var $scopeModal = document.getElementById('scope-modal');
+  var $scopeBtn = document.getElementById('scope-btn');
+  var $scopeClose = document.getElementById('scope-close');
+  var $scopeSave = document.getElementById('scope-save');
+  var $scopeReset = document.getElementById('scope-reset');
+  var $scopePatterns = document.getElementById('scope-patterns');
+  var $scopeStatus = document.getElementById('scope-status');
+
+  function closeScope() { $scopeModal.classList.remove('open'); }
+
+  function updateScopeStatus() {
+    if (isScopeAll(scopePatterns)) {
+      $scopeStatus.className = 'scope-status all';
+      $scopeStatus.textContent = 'Showing all targets';
+    } else {
+      $scopeStatus.className = 'scope-status active';
+      $scopeStatus.textContent = scopePatterns.length + ' pattern' + (scopePatterns.length !== 1 ? 's' : '') + ' active';
+    }
+  }
+
+  $scopeBtn.addEventListener('click', function() {
+    $scopePatterns.value = scopePatterns.join('\n');
+    updateScopeStatus();
+    $scopeModal.classList.add('open');
+  });
+
+  $scopeClose.addEventListener('click', closeScope);
+  $scopeModal.addEventListener('click', function(e) {
+    if (e.target === $scopeModal) closeScope();
+  });
+
+  $scopeSave.addEventListener('click', function() {
+    var lines = $scopePatterns.value.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+    if (lines.length === 0) lines = ['*'];
+    scopePatterns = lines;
+    saveScope(scopePatterns);
+    updateScopeBtn();
+    updateScopeStatus();
+    currentPage = 1;
+    fetchLogs();
+    closeScope();
+  });
+
+  $scopeReset.addEventListener('click', function() {
+    scopePatterns = ['*'];
+    $scopePatterns.value = '*';
+    saveScope(scopePatterns);
+    updateScopeBtn();
+    updateScopeStatus();
+    currentPage = 1;
+    fetchLogs();
+  });
+
+  /* Quick-add to scope modal */
+  var $scopeAddModal = document.getElementById('scope-add-modal');
+  var $scopeAddClose = document.getElementById('scope-add-close');
+  var $scopeAddCancel = document.getElementById('scope-add-cancel');
+  var $scopeAddSubmit = document.getElementById('scope-add-submit');
+  var $scopeAddInput = document.getElementById('scope-add-input');
+  var $scopeAddPreview = document.getElementById('scope-add-preview');
+
+  function closeScopeAdd() { $scopeAddModal.classList.remove('open'); }
+
+  function extractHost(target) {
+    return target.replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+  }
+
+  function openScopeAdd(target) {
+    var host = extractHost(target);
+    $scopeAddInput.value = host;
+    updateAddPreview();
+    $scopeAddModal.classList.add('open');
+    setTimeout(function() { $scopeAddInput.focus(); $scopeAddInput.select(); }, 50);
+  }
+
+  function updateAddPreview() {
+    var val = $scopeAddInput.value.trim();
+    if (!val) {
+      $scopeAddPreview.textContent = '';
+      return;
+    }
+    var already = scopePatterns.some(function(p) { return p === val; });
+    if (already) {
+      $scopeAddPreview.textContent = 'Already in scope.';
+    } else {
+      $scopeAddPreview.textContent = 'Will add: ' + val;
+    }
+  }
+
+  $scopeAddInput.addEventListener('input', updateAddPreview);
+
+  $scopeAddInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); $scopeAddSubmit.click(); }
+  });
+
+  $scopeAddClose.addEventListener('click', closeScopeAdd);
+  $scopeAddCancel.addEventListener('click', closeScopeAdd);
+  $scopeAddModal.addEventListener('click', function(e) {
+    if (e.target === $scopeAddModal) closeScopeAdd();
+  });
+
+  $scopeAddSubmit.addEventListener('click', function() {
+    var val = $scopeAddInput.value.trim();
+    if (!val) { closeScopeAdd(); return; }
+
+    // If scope was just *, replace it; otherwise append
+    if (isScopeAll(scopePatterns)) {
+      scopePatterns = [val];
+    } else if (!scopePatterns.some(function(p) { return p === val; })) {
+      scopePatterns.push(val);
+    }
+
+    saveScope(scopePatterns);
+    updateScopeBtn();
+    currentPage = 1;
+    fetchLogs();
+    closeScopeAdd();
   });
 
   fetchLogs();

@@ -35,7 +35,7 @@ _SEVERITY_COLOUR = {"HIGH": RED, "MEDIUM": YELLOW, "LOW": CYAN}
 
 # Pre-compiled patterns
 _SQL_RE = re.compile(
-    r"(?:UNION\s+SELECT|OR\s+1\s*=\s*1|'\s*OR\s*'|DROP\s+TABLE|;\s*--|;\s*\w)",
+    r"(?:UNION\s+SELECT|OR\s+1\s*=\s*1|'\s*OR\s*'|DROP\s+TABLE|;\s*--)",
     re.IGNORECASE,
 )
 _XSS_RE = re.compile(
@@ -46,7 +46,7 @@ _PATH_TRAVERSAL_RE = re.compile(
     r"(?:\.\./|\.\.%2[fF]|\.\.%5[cC]|%2[eE]%2[eE])",
 )
 _CMD_INJECTION_RE = re.compile(
-    r"(?:`|\$\(|;\s|(?<!=)\|\s|&&\s)",
+    r"(?:`[^`]+`|\$\(|&&\s*\w|(?<!=)\|\s*\w)",
 )
 _SENSITIVE_PARAM_RE = re.compile(
     r"(?:^|[?&])(?:password|passwd|secret|api_key|token|apikey)=",
@@ -91,15 +91,16 @@ def _check_risks(method, url, headers="", body=""):
     """
     risks = []
     url_decoded = unquote_plus(url)
-    combined = url_decoded + "\n" + headers
+    # URL + body for injection checks (headers contain benign semicolons etc.)
+    injectable = url_decoded + "\n" + body
 
-    # SQL injection
-    m = _SQL_RE.search(combined)
+    # SQL injection — scan URL + body only
+    m = _SQL_RE.search(injectable)
     if m:
         risks.append(("HIGH", f"SQL injection pattern: {m.group()!r}"))
 
-    # XSS
-    m = _XSS_RE.search(combined)
+    # XSS — scan URL + headers (onerror/onload can appear in injected headers)
+    m = _XSS_RE.search(url_decoded + "\n" + headers)
     if m:
         risks.append(("HIGH", f"XSS pattern: {m.group()!r}"))
 
@@ -108,8 +109,8 @@ def _check_risks(method, url, headers="", body=""):
     if m:
         risks.append(("HIGH", f"Path traversal pattern: {m.group()!r}"))
 
-    # Command injection
-    m = _CMD_INJECTION_RE.search(combined)
+    # Command injection — scan URL + body only
+    m = _CMD_INJECTION_RE.search(injectable)
     if m:
         risks.append(("HIGH", f"Command injection pattern: {m.group()!r}"))
 
@@ -190,7 +191,60 @@ def _build_payload(request_line, headers_str, body_bytes):
     }
 
 
-def log_request(client_addr, method, target, status="->", risks=None, payload=None):
+def _build_response_payload(status_line, headers_str, body_bytes):
+    """Build a response payload dict from raw response components."""
+    headers = []
+    for line in headers_str.split("\r\n"):
+        if not line:
+            continue
+        if ": " in line:
+            name, value = line.split(": ", 1)
+            headers.append([name, value])
+        elif ":" in line:
+            name, value = line.split(":", 1)
+            headers.append([name, value.lstrip()])
+
+    truncated = len(body_bytes) > MAX_BODY_LOG
+    body_chunk = body_bytes[:MAX_BODY_LOG]
+
+    try:
+        body = body_chunk.decode("utf-8")
+        body_is_binary = False
+    except UnicodeDecodeError:
+        body = base64.b64encode(body_chunk).decode("ascii")
+        body_is_binary = True
+
+    return {
+        "status_line": status_line,
+        "headers": headers,
+        "body": body,
+        "body_is_binary": body_is_binary,
+        "body_truncated": truncated,
+    }
+
+
+def _parse_response(data):
+    """Parse raw HTTP response bytes into (status_line, headers_str, body_bytes, status_code)."""
+    header_end = data.find(b"\r\n\r\n")
+    if header_end == -1:
+        return None
+    header_block = data[:header_end].decode("ascii", errors="replace")
+    body_bytes = data[header_end + 4:]
+    first_line_end = header_block.find("\r\n")
+    if first_line_end == -1:
+        status_line = header_block
+        headers_str = ""
+    else:
+        status_line = header_block[:first_line_end]
+        headers_str = header_block[first_line_end + 2:]
+    # Extract status code
+    parts = status_line.split(" ", 2)
+    status_code = parts[1] if len(parts) >= 2 else "???"
+    return status_line, headers_str, body_bytes, status_code
+
+
+def log_request(client_addr, method, target, status="->", risks=None, payload=None,
+                response=None):
     """Log a request to stdout and append a JSONL line to LOG_FILE."""
     if risks is None:
         risks = []
@@ -214,6 +268,8 @@ def log_request(client_addr, method, target, status="->", risks=None, payload=No
         }
         if payload is not None:
             entry["payload"] = payload
+        if response is not None:
+            entry["response"] = response
         try:
             with open(LOG_FILE, "a") as f:
                 f.write(json.dumps(entry) + "\n")
@@ -240,9 +296,24 @@ def _blind_tunnel(client_sock, remote_sock):
         client_sock.close()
 
 
-def _log_mitm_request(data, host, addr):
-    """Log the HTTP request line from decrypted MITM data."""
+_HTTP_METHODS = frozenset((b"GET", b"POST", b"PUT", b"DELETE", b"PATCH",
+                           b"HEAD", b"OPTIONS", b"TRACE"))
+
+
+def _parse_mitm_request(data, host):
+    """Parse decrypted MITM request data.
+
+    Returns (method, full_url, risks, payload) or None for non-HTTP data.
+    """
     try:
+        # Quick check: valid HTTP requests start with an ASCII method token
+        first_space = data.find(b" ")
+        if first_space < 3 or first_space > 7:
+            return None
+        method_bytes = data[:first_space]
+        if method_bytes not in _HTTP_METHODS:
+            return None
+
         first_line_end = data.find(b"\r\n")
         if first_line_end == -1:
             first_line_end = data.find(b"\n")
@@ -261,7 +332,6 @@ def _log_mitm_request(data, host, addr):
             if len(header_body) == 2:
                 header_block = header_body[0].decode("ascii", errors="replace")
                 body_bytes = header_body[1]
-                # Skip the request line to get just headers
                 _, headers_str = header_block.split("\r\n", 1) if "\r\n" in header_block else (header_block, "")
             else:
                 headers_str = ""
@@ -272,16 +342,37 @@ def _log_mitm_request(data, host, addr):
 
             request_line = f"{method} {full_url} {parts[2] if len(parts) >= 3 else 'HTTP/1.1'}"
             payload = _build_payload(request_line, headers_str, body_bytes)
-            log_request(addr, method, full_url, "MITM", risks, payload=payload)
-        else:
-            log_request(addr, "???", f"https://{host} (unparseable)", "MITM")
+            return (method, full_url, risks, payload)
     except Exception:
         pass
+    return None
 
 
 def _mitm_relay(client_tls, remote_tls, host, addr):
-    """Relay decrypted HTTP between client and server, logging requests."""
+    """Relay decrypted HTTP between client and server, logging requests+responses."""
     sockets = [client_tls, remote_tls]
+    # Track pending request to pair with its response
+    pending_req = None  # (method, full_url, risks, payload)
+    response_buf = b""
+
+    def _flush_response():
+        nonlocal pending_req, response_buf
+        if pending_req and response_buf:
+            method, full_url, risks, payload = pending_req
+            parsed = _parse_response(response_buf)
+            if parsed:
+                status_line, resp_headers, resp_body, status_code = parsed
+                resp_payload = _build_response_payload(status_line, resp_headers, resp_body)
+                log_request(addr, method, full_url, status_code, risks, payload=payload,
+                            response=resp_payload)
+            else:
+                log_request(addr, method, full_url, "MITM", risks, payload=payload)
+        elif pending_req:
+            method, full_url, risks, payload = pending_req
+            log_request(addr, method, full_url, "MITM", risks, payload=payload)
+        pending_req = None
+        response_buf = b""
+
     while True:
         readable, _, exceptional = select.select(sockets, [], sockets, 30)
         if exceptional:
@@ -292,23 +383,37 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
             try:
                 data = sock.recv(BUFFER_SIZE)
             except ssl.SSLError:
+                _flush_response()
                 return
             if not data:
+                _flush_response()
                 return
 
             if sock is client_tls:
-                _log_mitm_request(data, host, addr)
+                # New request from client — flush any pending response first
+                _flush_response()
+                pending_req = _parse_mitm_request(data, host)
                 remote_tls.sendall(data)
             else:
+                # Response from server
+                if len(response_buf) < MAX_BODY_LOG + 8192:
+                    response_buf += data
                 client_tls.sendall(data)
 
             # Drain any SSL-buffered data not visible to select()
             while sock.pending() > 0:
                 extra = sock.recv(sock.pending())
                 if not extra:
+                    _flush_response()
                     return
-                target = remote_tls if sock is client_tls else client_tls
-                target.sendall(extra)
+                if sock is client_tls:
+                    remote_tls.sendall(extra)
+                else:
+                    if len(response_buf) < MAX_BODY_LOG + 8192:
+                        response_buf += extra
+                    client_tls.sendall(extra)
+
+    _flush_response()
 
 
 def handle_connect(client_sock, host, port, addr):
@@ -407,13 +512,13 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
         client_sock.close()
         return
 
-    log_request(addr, method, url, "->", risks, payload=payload)
     request = f"{method} {path} {version}\r\n{forwarded_headers}"
     try:
         remote_sock.sendall(request.encode())
         if body_start:
             remote_sock.sendall(body_start)
 
+        response_buf = b""
         while True:
             readable, _, _ = select.select([remote_sock], [], [], 30)
             if not readable:
@@ -421,7 +526,19 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
             data = remote_sock.recv(BUFFER_SIZE)
             if not data:
                 break
+            if len(response_buf) < MAX_BODY_LOG + 8192:
+                response_buf += data
             client_sock.sendall(data)
+
+        # Parse and log response
+        parsed = _parse_response(response_buf)
+        if parsed:
+            status_line, resp_headers, resp_body, status_code = parsed
+            resp_payload = _build_response_payload(status_line, resp_headers, resp_body)
+            log_request(addr, method, url, status_code, risks, payload=payload,
+                        response=resp_payload)
+        else:
+            log_request(addr, method, url, "->", risks, payload=payload)
     finally:
         remote_sock.close()
         client_sock.close()
