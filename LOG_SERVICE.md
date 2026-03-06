@@ -206,6 +206,10 @@ ports:
   - "${VIEWER_PORT:-9999}:9999"   # log viewer
 ```
 
+## OpenAPI Specification
+
+A machine-readable OpenAPI 3.1 spec is available at [`openapi.yaml`](openapi.yaml). It covers all endpoints, query parameters, and response schemas documented below. Use it for code generation, API clients, or importing into tools like Swagger UI or Postman.
+
 ## Examples
 
 ```bash

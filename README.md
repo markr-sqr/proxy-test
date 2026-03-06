@@ -233,7 +233,7 @@ The log viewer runs on port 9999 (configurable via `VIEWER_PORT`) and provides:
 - **Scope modal** — wildcard target filtering with per-row quick-add button; filters take effect immediately
 - **REST API** at `/api/logs` — paginated, filterable JSON endpoint
 
-See [LOG_SERVICE.md](LOG_SERVICE.md) for full API documentation.
+See [LOG_SERVICE.md](LOG_SERVICE.md) for full API documentation and [openapi.yaml](openapi.yaml) for the OpenAPI 3.1 specification.
 
 ## Log Format
 
