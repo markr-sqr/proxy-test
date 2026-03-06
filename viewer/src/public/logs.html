@@ -896,6 +896,186 @@
     color: #8b949e;
     margin-top: 6px;
   }
+
+  /* Sensitive data — inline detail row */
+  .sensitive-section {
+    margin-top: 4px;
+  }
+
+  .sensitive-finding {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid #21262d;
+    flex-wrap: wrap;
+  }
+
+  .sensitive-finding:last-child { border-bottom: none; }
+
+  .sensitive-type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .sensitive-type-badge.stype-token { background: #3d1418; color: #f85149; }
+  .sensitive-type-badge.stype-credential { background: #3d1418; color: #f85149; }
+  .sensitive-type-badge.stype-cookie { background: #3b2e00; color: #d29922; }
+  .sensitive-type-badge.stype-session { background: #3b2e00; color: #d29922; }
+  .sensitive-type-badge.stype-pii { background: #0a2e3d; color: #39d2c0; }
+  .sensitive-type-badge.stype-key { background: #3d1418; color: #f85149; }
+
+  .sensitive-source-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    background: #1c2128;
+    color: #8b949e;
+    border: 1px solid #30363d;
+  }
+
+  .sensitive-field {
+    color: #d29922;
+    font-weight: 600;
+    font-size: 12px;
+  }
+
+  .sensitive-value {
+    font-size: 12px;
+    color: #c9d1d9;
+    word-break: break-all;
+  }
+
+  .sensitive-reveal-btn {
+    background: none;
+    border: 1px solid #30363d;
+    color: #58a6ff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .sensitive-reveal-btn:hover {
+    background: #21262d;
+    color: #79c0ff;
+  }
+
+  .sensitive-decoded {
+    width: 100%;
+    margin-top: 4px;
+    background: #0d1117;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border-left: 3px solid #f85149;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 150px;
+    overflow-y: auto;
+    color: #c9d1d9;
+  }
+
+  /* Sensitive count badge in table row */
+  .sens-count-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    background: #3d1418;
+    color: #f85149;
+    margin-left: 4px;
+  }
+
+  /* Sensitive data summary modal */
+  .modal-xlarge {
+    width: 1100px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .sens-summary-stats {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .sens-stat {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 12px 16px;
+    text-align: center;
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .sens-stat-val {
+    font-size: 24px;
+    font-weight: 700;
+    color: #f85149;
+    line-height: 1.2;
+  }
+
+  .sens-stat-label {
+    font-size: 11px;
+    color: #8b949e;
+    margin-top: 2px;
+  }
+
+  .sens-group {
+    margin-bottom: 16px;
+  }
+
+  .sens-group-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e6edf3;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #30363d;
+  }
+
+  .sens-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .sens-table th {
+    background: #0d1117;
+    color: #8b949e;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 6px 10px;
+    text-align: left;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .sens-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #21262d;
+    vertical-align: top;
+  }
+
+  .sens-table tr:hover td { background: #1c2128; }
+
+  .sens-ref {
+    font-size: 11px;
+    color: #58a6ff;
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -908,6 +1088,7 @@
         <label for="auto-refresh" id="auto-refresh-label">Auto-refresh (5s)</label>
       </div>
       <button class="scope-btn" id="scope-btn" title="Scope">&#9678;</button>
+      <button class="settings-btn" id="sensitive-btn" title="Sensitive Data Summary">&#128274;</button>
       <button class="settings-btn" id="dashboard-btn" title="Dashboard">&#9776;</button>
       <button class="settings-btn" id="settings-btn" title="Settings">&#9881;</button>
     </div>
@@ -1091,6 +1272,18 @@
       <div class="modal-footer">
         <button class="btn" id="scope-add-cancel">Cancel</button>
         <button class="btn btn-primary" id="scope-add-submit">Add to Scope</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="sensitive-modal">
+    <div class="modal modal-xlarge">
+      <div class="modal-header">
+        <h2>Sensitive Data Summary</h2>
+        <button class="modal-close" id="sensitive-close">&times;</button>
+      </div>
+      <div class="modal-body" id="sensitive-body">
+        <div class="dash-empty">Loading sensitive data...</div>
       </div>
     </div>
   </div>
@@ -1350,6 +1543,64 @@
     return results;
   }
 
+  function sensTypeBadgeClass(type) {
+    switch (type) {
+      case 'bearer_token': case 'jwt': case 'api_key': return 'stype-token';
+      case 'basic_auth': case 'password': return 'stype-credential';
+      case 'cookie': return 'stype-cookie';
+      case 'session_token': return 'stype-session';
+      case 'email': case 'phone': case 'ssn': case 'credit_card': return 'stype-pii';
+      case 'private_key': case 'aws_credentials': return 'stype-key';
+      default: return 'stype-token';
+    }
+  }
+
+  function maskValue(value, type) {
+    if (!value) return '****';
+    switch (type) {
+      case 'password':
+        return '****';
+      case 'ssn':
+        return value.length >= 4 ? '***-**-' + value.slice(-4) : '****';
+      case 'credit_card':
+        var digits = value.replace(/[\s-]/g, '');
+        return digits.length >= 4 ? '**** **** **** ' + digits.slice(-4) : '****';
+      case 'phone':
+        return value.length >= 4 ? '***-***-' + value.slice(-4) : '****';
+      case 'email': {
+        var at = value.indexOf('@');
+        if (at > 1) return value[0] + '***@' + value.slice(at + 1);
+        return '****';
+      }
+      default:
+        if (value.length <= 8) return value.slice(0, 2) + '****';
+        return value.slice(0, 4) + '...' + value.slice(-4);
+    }
+  }
+
+  var _sensRevealCounter = 0;
+
+  function renderSensitiveFindings(findings) {
+    if (!findings || findings.length === 0) return '';
+    var html = '<div class="sensitive-section">';
+    findings.forEach(function(f) {
+      var id = 'sens-reveal-' + (++_sensRevealCounter);
+      var masked = maskValue(f.value, f.type);
+      html += '<div class="sensitive-finding">';
+      html += '<span class="sensitive-type-badge ' + sensTypeBadgeClass(f.type) + '">' + escapeHtml(f.type.replace(/_/g, ' ')) + '</span>';
+      html += '<span class="sensitive-source-badge">' + escapeHtml(f.source.replace(/_/g, ' ')) + '</span>';
+      html += '<span class="sensitive-field">' + escapeHtml(f.field_name) + '</span>';
+      html += '<span class="sensitive-value" id="' + id + '-val">' + escapeHtml(masked) + '</span>';
+      html += '<button class="sensitive-reveal-btn" data-id="' + id + '" data-full="' + escapeHtml(f.value).replace(/"/g, '&quot;') + '" data-masked="' + escapeHtml(masked).replace(/"/g, '&quot;') + '" onclick="(function(btn){var el=document.getElementById(btn.dataset.id+\'-val\');if(btn.textContent===\'Reveal\'){el.textContent=btn.dataset.full;btn.textContent=\'Hide\';}else{el.textContent=btn.dataset.masked;btn.textContent=\'Reveal\';}})(this)">Reveal</button>';
+      if (f.decoded) {
+        html += '<div class="sensitive-decoded">' + escapeHtml(f.decoded) + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
   function renderDetailRow(entry, colSpan) {
     var tr = document.createElement('tr');
     tr.className = 'detail-row';
@@ -1368,6 +1619,13 @@
                 '<span>' + escapeHtml(r.description) + '</span></div>';
       });
       html += '</div></div>';
+    }
+
+    // Sensitive data section
+    if (entry.sensitive_data && entry.sensitive_data.length > 0) {
+      html += '<div><div class="detail-section-title">Sensitive Data (' + entry.sensitive_data.length + ')</div>';
+      html += renderSensitiveFindings(entry.sensitive_data);
+      html += '</div>';
     }
 
     // Payload section
@@ -1606,7 +1864,10 @@
         '<td>' + escapeHtml(entry.target) + '</td>' +
         '<td><span class="' + statusClass(entry.status) + '">' +
              escapeHtml(entry.status) + '</span></td>' +
-        '<td>' + renderRiskBadges(entry.risks) + '</td>' +
+        '<td>' + renderRiskBadges(entry.risks) +
+        (entry.sensitive_data && entry.sensitive_data.length > 0
+          ? ' <span class="sens-count-badge">SENS ' + entry.sensitive_data.length + '</span>'
+          : '') + '</td>' +
         '<td><button class="scope-add-btn" title="Add to scope">+</button></td>';
 
       var scopeBtn = tr.querySelector('.scope-add-btn');
@@ -1748,6 +2009,7 @@
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
       if ($scopeAddModal.classList.contains('open')) closeScopeAdd();
+      else if (document.getElementById('sensitive-modal').classList.contains('open')) document.getElementById('sensitive-modal').classList.remove('open');
       else if ($scopeModal.classList.contains('open')) closeScope();
       else if ($dashModal.classList.contains('open')) closeDash();
       else if ($modal.classList.contains('open')) closeModal();
@@ -2088,6 +2350,110 @@
     currentPage = 1;
     fetchLogs();
     closeScopeAdd();
+  });
+
+  /* Sensitive Data Summary modal */
+  var $sensModal = document.getElementById('sensitive-modal');
+  var $sensBtn = document.getElementById('sensitive-btn');
+  var $sensClose = document.getElementById('sensitive-close');
+  var $sensBody = document.getElementById('sensitive-body');
+
+  function closeSens() { $sensModal.classList.remove('open'); }
+
+  $sensBtn.addEventListener('click', function() {
+    $sensModal.classList.add('open');
+    $sensBody.innerHTML = '<div class="dash-empty">Loading sensitive data...</div>';
+    fetch('/api/logs?page=1&limit=10000')
+      .then(function(r) { return r.json(); })
+      .then(function(data) { renderSensitiveModal(data.entries); })
+      .catch(function(e) {
+        $sensBody.innerHTML = '<div class="dash-empty">Error: ' + escapeHtml(String(e)) + '</div>';
+      });
+  });
+
+  $sensClose.addEventListener('click', closeSens);
+  $sensModal.addEventListener('click', function(e) {
+    if (e.target === $sensModal) closeSens();
+  });
+
+  function renderSensitiveModal(entries) {
+    // Collect all findings with references to their entry
+    var allFindings = [];
+    var affectedRequests = 0;
+    var typeCounts = {};
+    entries.forEach(function(e) {
+      if (e.sensitive_data && e.sensitive_data.length > 0) {
+        affectedRequests++;
+        e.sensitive_data.forEach(function(f) {
+          allFindings.push({ finding: f, entry: e });
+          typeCounts[f.type] = (typeCounts[f.type] || 0) + 1;
+        });
+      }
+    });
+
+    if (allFindings.length === 0) {
+      $sensBody.innerHTML = '<div class="dash-empty">No sensitive data detected across all log entries.</div>';
+      return;
+    }
+
+    var html = '';
+
+    // Summary stats
+    html += '<div class="sens-summary-stats">';
+    html += '<div class="sens-stat"><div class="sens-stat-val">' + allFindings.length + '</div><div class="sens-stat-label">Total Findings</div></div>';
+    html += '<div class="sens-stat"><div class="sens-stat-val">' + Object.keys(typeCounts).length + '</div><div class="sens-stat-label">Data Types</div></div>';
+    html += '<div class="sens-stat"><div class="sens-stat-val">' + affectedRequests + '</div><div class="sens-stat-label">Affected Requests</div></div>';
+    html += '</div>';
+
+    // Group by category
+    var categories = {
+      'Tokens': ['bearer_token', 'jwt', 'api_key'],
+      'Credentials': ['basic_auth', 'password'],
+      'PII': ['email', 'phone', 'ssn', 'credit_card'],
+      'Keys & Secrets': ['private_key', 'aws_credentials'],
+      'Cookies & Sessions': ['cookie', 'session_token']
+    };
+
+    Object.keys(categories).forEach(function(catName) {
+      var types = categories[catName];
+      var catFindings = allFindings.filter(function(f) { return types.indexOf(f.finding.type) !== -1; });
+      if (catFindings.length === 0) return;
+
+      html += '<div class="sens-group">';
+      html += '<div class="sens-group-title">' + escapeHtml(catName) + ' (' + catFindings.length + ')</div>';
+      html += '<table class="sens-table"><thead><tr>';
+      html += '<th>Type</th><th>Source</th><th>Field</th><th>Value</th><th>Request</th>';
+      html += '</tr></thead><tbody>';
+
+      catFindings.forEach(function(item) {
+        var f = item.finding;
+        var e = item.entry;
+        var mid = 'sens-modal-' + (++_sensRevealCounter);
+        var masked = maskValue(f.value, f.type);
+        var ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : '';
+
+        html += '<tr>';
+        html += '<td><span class="sensitive-type-badge ' + sensTypeBadgeClass(f.type) + '">' + escapeHtml(f.type.replace(/_/g, ' ')) + '</span></td>';
+        html += '<td><span class="sensitive-source-badge">' + escapeHtml(f.source.replace(/_/g, ' ')) + '</span></td>';
+        html += '<td class="sensitive-field">' + escapeHtml(f.field_name) + '</td>';
+        html += '<td><span id="' + mid + '-val">' + escapeHtml(masked) + '</span> ';
+        html += '<button class="sensitive-reveal-btn" data-id="' + mid + '" data-full="' + escapeHtml(f.value).replace(/"/g, '&quot;') + '" data-masked="' + escapeHtml(masked).replace(/"/g, '&quot;') + '" onclick="(function(btn){var el=document.getElementById(btn.dataset.id+\'-val\');if(btn.textContent===\'Reveal\'){el.textContent=btn.dataset.full;btn.textContent=\'Hide\';}else{el.textContent=btn.dataset.masked;btn.textContent=\'Reveal\';}})(this)">Reveal</button></td>';
+        html += '<td class="sens-ref">' + escapeHtml(e.method) + ' ' + escapeHtml(e.target.length > 50 ? e.target.slice(0, 50) + '...' : e.target) + '<br>' + escapeHtml(ts) + '</td>';
+        html += '</tr>';
+      });
+
+      html += '</tbody></table></div>';
+    });
+
+    $sensBody.innerHTML = html;
+  }
+
+  // Add sensitive modal to Escape handler
+  var _origKeydown = document.onkeydown;
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && $sensModal.classList.contains('open')) {
+      closeSens();
+    }
   });
 
   fetchLogs();
