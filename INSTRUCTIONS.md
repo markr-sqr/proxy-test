@@ -73,8 +73,8 @@ Override defaults with environment variables:
 |----------|---------|-------------|
 | `PROXY_PORT` | `8080` | Host port for the proxy |
 | `VIEWER_PORT` | `9999` | Host port for the log viewer |
-| `PROXY_UID` | `1000` | UID the container runs as |
-| `PROXY_GID` | `1000` | GID the container runs as |
+| `PROXY_UID` | `1001` | UID the container runs as |
+| `PROXY_GID` | `972` | GID the container runs as |
 
 ```bash
 PROXY_PORT=3128 VIEWER_PORT=8888 docker compose up -d
@@ -436,14 +436,19 @@ The proxy includes a web-based log viewer that runs alongside the proxy (started
 Open `http://localhost:9999/ui/logs` in your browser. The UI provides:
 
 - **Filterable table** — filter by method, URL substring, severity, and time range
-- **Content-type badges** — each row shows the request content type (e.g., `image/png`, `application/json`) next to the method pill for quick identification
+- **Sortable columns** — click any column header to sort ascending/descending (timestamp, client, method, target, status, risks)
+- **Content-type badges** — each row shows the request content type (e.g., `image/png`, `application/json`) next to the method pill
 - **Expandable detail rows** — click any row to see:
-  - Security risk details with severity badges
+  - Security risk details with severity badges (request + response risks)
   - Full request line, headers, and body
-  - Image previews for image payloads (rendered inline)
+  - Full response status line, headers, and body
+  - Image previews for image payloads in both request and response (rendered inline)
   - Auto-decoded data: base64, JWT tokens, URL-encoded forms, hex-encoded content
-- **Auto-refresh** — toggle 5-second polling to watch requests in real time
-- **Pagination** — navigate through large log files
+- **Scope filtering** — define wildcard patterns (e.g., `*.example.com`) to show only matching targets. Click the `+` button on any row to quick-add its target to the scope. Scope changes take effect immediately.
+- **Settings modal** — configure auto-refresh interval, font size, rows per page, and compact view (persisted to localStorage)
+- **Dashboard modal** — view traffic statistics: total requests, unique clients, risk counts, traffic over time chart, requests by method, status code breakdown, top 10 targets, and risk severity summary
+- **Auto-refresh** — configurable polling interval to watch requests in real time
+- **Pagination** — navigate through large log files; adjusts correctly when scope filtering is active
 
 ### REST API
 
@@ -473,11 +478,9 @@ Every proxied request is logged to the console and to a JSONL file (`/tmp/proxy.
 
 | Status | Meaning |
 |--------|---------|
-| `->` | Request received, processing started. |
-| `200` | Request successfully forwarded to upstream. |
+| `200`, `301`, `404`, etc. | Actual HTTP status code from the upstream response. |
 | `502` | Could not connect to the upstream server (Bad Gateway). |
-| `intercepting` | MITM TLS interception established for this connection. |
-| `MITM` | Decrypted HTTPS request logged (only in MITM mode). |
+| `MITM` | CONNECT tunnel established with TLS interception (only in MITM mode). |
 | `502-upstream(...)` | Upstream TLS connection failed (details in parentheses). |
 | `TLS-ERR(...)` | Client-side TLS handshake failed (details in parentheses). |
 
@@ -827,7 +830,7 @@ This tool is intended for **development and debugging only**. Keep the following
 
 | File | Purpose |
 |------|---------|
-| `proxy.py` | Main proxy server. Handles HTTP forwarding, CONNECT tunneling, MITM interception, payload capture, and JSONL logging. Uses Python's `socket`, `select`, `ssl`, and `threading` modules. |
+| `proxy.py` | Main proxy server. Handles HTTP forwarding, CONNECT tunneling, MITM interception, request/response payload capture, security risk detection (request patterns + response header checks), and JSONL logging. Uses Python's `socket`, `select`, `ssl`, and `threading` modules. |
 | `mitm_certs.py` | Certificate generation. Creates the root CA on first run, generates per-host certificates on demand, and provides SSL context factories. Uses the `cryptography` library. |
 | `requirements.txt` | Python dependencies for the project (`cryptography`). Used by the venv setup. |
 | `Dockerfile` | Container image definition. Bundles Python, Node.js, proxy, and viewer into a single image. |
@@ -835,7 +838,7 @@ This tool is intended for **development and debugging only**. Keep the following
 | `entrypoint.sh` | Container entrypoint. Starts both the proxy and viewer as background processes, handles graceful shutdown. |
 | `viewer/src/index.ts` | Log viewer Express server. Serves the web UI and REST API on port 9999. |
 | `viewer/src/routes/logs.ts` | API route handler for `/api/logs` with filtering and pagination. |
-| `viewer/src/public/logs.html` | Log viewer web UI. Renders log table with payload inspection, image previews, and auto-decoding. |
+| `viewer/src/public/logs.html` | Log viewer web UI. Full-width sortable table with request/response payload inspection, image previews, auto-decoding, settings/dashboard/scope modals. |
 | `tests/setup_venv.sh` | Venv bootstrap script. Creates `.venv/`, installs deps, exports `$PYTHON`. |
 | `tests/helpers.sh` | Shared test utilities. Sources the venv setup, provides proxy start/stop, TAP assertion helpers, and cleanup traps. |
 | `tests/run_all.sh` | Test runner. Executes all `test_*.sh` scripts and summarizes pass/fail counts. |
