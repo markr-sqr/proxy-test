@@ -1290,6 +1290,12 @@
 
 <script>
 (function() {
+  /* Pre-compiled regex patterns for tryDecodeEncodings */
+  var RE_URL_ENCODED = /^[a-zA-Z0-9_.~%+-]+=/;
+  var RE_JWT = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]*)?/;
+  var RE_BASE64 = /^[A-Za-z0-9+/]{20,}={0,2}$/;
+  var RE_HEX = /^[0-9a-fA-F]{20,}$/;
+
   /* Settings management */
   var DEFAULTS = { refreshInterval: 5, fontSize: 13, rowsPerPage: 50, compact: false };
 
@@ -1347,11 +1353,18 @@
     localStorage.setItem('proxyViewerScope', JSON.stringify(patterns));
   }
 
+  var _wildcardCache = {};
+
   function wildcardToRegex(pattern) {
+    if (_wildcardCache[pattern]) return _wildcardCache[pattern];
     var esc = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     esc = esc.replace(/\*/g, '.*').replace(/\?/g, '.');
-    return new RegExp('^' + esc + '$', 'i');
+    var re = new RegExp('^' + esc + '$', 'i');
+    _wildcardCache[pattern] = re;
+    return re;
   }
+
+  function clearWildcardCache() { _wildcardCache = {}; }
 
   function isScopeAll(patterns) {
     return patterns.length === 0 || (patterns.length === 1 && patterns[0] === '*');
@@ -1362,7 +1375,8 @@
     var host = target.replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
     for (var i = 0; i < patterns.length; i++) {
       try {
-        if (wildcardToRegex(patterns[i]).test(host) || wildcardToRegex(patterns[i]).test(target)) return true;
+        var re = wildcardToRegex(patterns[i]);
+        if (re.test(host) || re.test(target)) return true;
       } catch(e) {}
     }
     return false;
@@ -1476,7 +1490,7 @@
     }
 
     // URL-encoded form data
-    if (/^[a-zA-Z0-9_.~%+-]+=/.test(bodyStr) && bodyStr.indexOf('&') !== -1) {
+    if (RE_URL_ENCODED.test(bodyStr) && bodyStr.indexOf('&') !== -1) {
       try {
         var params = new URLSearchParams(bodyStr);
         var lines = [];
@@ -1488,7 +1502,7 @@
     }
 
     // JWT detection (eyJ prefix with dot-separated parts)
-    var jwtMatch = bodyStr.match(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]*)?/);
+    var jwtMatch = bodyStr.match(RE_JWT);
     if (jwtMatch) {
       try {
         var jwtParts = jwtMatch[0].split('.');
@@ -1502,7 +1516,7 @@
     }
 
     // Base64 detection (20+ chars of valid base64, not already decoded as JWT)
-    if (!jwtMatch && /^[A-Za-z0-9+/]{20,}={0,2}$/.test(bodyStr.trim())) {
+    if (!jwtMatch && RE_BASE64.test(bodyStr.trim())) {
       try {
         var decoded = atob(bodyStr.trim());
         // Check if result is printable text
@@ -1524,7 +1538,7 @@
     }
 
     // Hex-encoded detection (20+ even-length hex chars)
-    if (/^[0-9a-fA-F]{20,}$/.test(bodyStr.trim()) && bodyStr.trim().length % 2 === 0) {
+    if (RE_HEX.test(bodyStr.trim()) && bodyStr.trim().length % 2 === 0) {
       try {
         var hexStr = bodyStr.trim();
         var text = '';
@@ -1718,7 +1732,7 @@
             if (r.headers[ri][0].toLowerCase() === 'content-type') { respCt = r.headers[ri][1]; break; }
           }
         }
-        var respIsImage = respCt && respCt.split(';')[0].trim().indexOf('image/') === 0;
+        var respIsImage = isImageContentType(respCt);
 
         if (respIsImage && r.body_is_binary) {
           var respMime = respCt.split(';')[0].trim();
@@ -2104,7 +2118,7 @@
     var riskCounts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
     var targetCounts = {};
     var totalRisks = 0;
-    var clients = {};
+    var clients = new Set();
 
     entries.forEach(function(e) {
       // Methods
@@ -2136,7 +2150,7 @@
       if (host) targetCounts[host] = (targetCounts[host] || 0) + 1;
 
       // Unique clients
-      clients[e.client_ip] = true;
+      clients.add(e.client_ip);
     });
 
     // Sort methods
@@ -2163,7 +2177,7 @@
       return { key: k, label: k, count: riskCounts[k] };
     });
 
-    var uniqueClients = Object.keys(clients).length;
+    var uniqueClients = clients.size;
 
     // Build HTML
     var html = '';
@@ -2268,6 +2282,7 @@
     var lines = $scopePatterns.value.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
     if (lines.length === 0) lines = ['*'];
     scopePatterns = lines;
+    clearWildcardCache();
     saveScope(scopePatterns);
     updateScopeBtn();
     updateScopeStatus();
@@ -2278,6 +2293,7 @@
 
   $scopeReset.addEventListener('click', function() {
     scopePatterns = ['*'];
+    clearWildcardCache();
     $scopePatterns.value = '*';
     saveScope(scopePatterns);
     updateScopeBtn();
@@ -2345,6 +2361,7 @@
       scopePatterns.push(val);
     }
 
+    clearWildcardCache();
     saveScope(scopePatterns);
     updateScopeBtn();
     currentPage = 1;
