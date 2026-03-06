@@ -40,31 +40,53 @@ async function parseLogFile(): Promise<LogEntry[]> {
   return entries;
 }
 
-function matchesQuery(entry: LogEntry, query: LogQuery): boolean {
+interface PreparedFilter {
+  startTime: number | null;
+  endTime: number | null;
+  method: string | null;
+  urlLower: string | null;
+  severity: string | null;
+}
+
+function prepareFilter(query: LogQuery): PreparedFilter {
+  let startTime: number | null = null;
   if (query.start) {
-    const startTime = new Date(query.start).getTime();
-    if (isNaN(startTime)) return true;
-    if (new Date(entry.timestamp).getTime() < startTime) return false;
+    const t = new Date(query.start).getTime();
+    if (!isNaN(t)) startTime = t;
   }
-
+  let endTime: number | null = null;
   if (query.end) {
-    const endTime = new Date(query.end).getTime();
-    if (isNaN(endTime)) return true;
-    if (new Date(entry.timestamp).getTime() > endTime) return false;
+    const t = new Date(query.end).getTime();
+    if (!isNaN(t)) endTime = t;
+  }
+  return {
+    startTime,
+    endTime,
+    method: query.method ? query.method.toUpperCase() : null,
+    urlLower: query.url ? query.url.toLowerCase() : null,
+    severity: query.severity ? query.severity.toUpperCase() : null,
+  };
+}
+
+function matchesFilter(entry: LogEntry, f: PreparedFilter): boolean {
+  if (f.startTime !== null) {
+    if (new Date(entry.timestamp).getTime() < f.startTime) return false;
   }
 
-  if (query.method) {
-    if (entry.method.toUpperCase() !== query.method.toUpperCase()) return false;
+  if (f.endTime !== null) {
+    if (new Date(entry.timestamp).getTime() > f.endTime) return false;
   }
 
-  if (query.url) {
-    if (!entry.target.toLowerCase().includes(query.url.toLowerCase()))
-      return false;
+  if (f.method) {
+    if (entry.method.toUpperCase() !== f.method) return false;
   }
 
-  if (query.severity) {
-    const sev = query.severity.toUpperCase();
-    if (!entry.risks.some((r) => r.severity.toUpperCase() === sev))
+  if (f.urlLower) {
+    if (!entry.target.toLowerCase().includes(f.urlLower)) return false;
+  }
+
+  if (f.severity) {
+    if (!entry.risks.some((r) => r.severity.toUpperCase() === f.severity))
       return false;
   }
 
@@ -73,7 +95,8 @@ function matchesQuery(entry: LogEntry, query: LogQuery): boolean {
 
 export async function queryLogs(query: LogQuery): Promise<LogResponse> {
   const all = await parseLogFile();
-  const filtered = all.filter((e) => matchesQuery(e, query));
+  const pf = prepareFilter(query);
+  const filtered = all.filter((e) => matchesFilter(e, pf));
   const total = filtered.length;
 
   const start = (query.page - 1) * query.limit;

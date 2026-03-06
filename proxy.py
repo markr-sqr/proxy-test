@@ -136,22 +136,23 @@ _SENS_BODY_JSON_RE = re.compile(
 )
 
 
+def _b64url_decode(s):
+    """Decode a base64url-encoded string (with padding fix)."""
+    s = s.replace("-", "+").replace("_", "/")
+    pad = 4 - len(s) % 4
+    if pad != 4:
+        s += "=" * pad
+    return base64.b64decode(s)
+
+
 def _decode_jwt(token):
     """Decode JWT header and payload (no signature verification)."""
     try:
         parts = token.split(".")
         if len(parts) < 2:
             return None
-        # Pad base64url
-        def _b64pad(s):
-            s = s.replace("-", "+").replace("_", "/")
-            pad = 4 - len(s) % 4
-            if pad != 4:
-                s += "=" * pad
-            return s
-
-        header = json.loads(base64.b64decode(_b64pad(parts[0])).decode("utf-8", errors="replace"))
-        payload = json.loads(base64.b64decode(_b64pad(parts[1])).decode("utf-8", errors="replace"))
+        header = json.loads(_b64url_decode(parts[0]).decode("utf-8", errors="replace"))
+        payload = json.loads(_b64url_decode(parts[1]).decode("utf-8", errors="replace"))
         return json.dumps({"header": header, "payload": payload}, indent=2)
     except Exception:
         return None
@@ -160,7 +161,7 @@ def _decode_jwt(token):
 def _decode_basic_auth(b64):
     """Decode Basic auth base64 to username:password."""
     try:
-        return base64.b64decode(b64).decode("utf-8", errors="replace")
+        return _b64url_decode(b64).decode("utf-8", errors="replace")
     except Exception:
         return None
 
@@ -385,6 +386,12 @@ def _extract_sensitive_data(url, req_headers, req_body, resp_headers="", resp_bo
     return unique
 
 
+_PROXY_CONN_RE = re.compile(
+    r"Proxy-Connection:[^\r\n]*\r\n", re.IGNORECASE,
+)
+_CONTENT_LENGTH_RE = re.compile(
+    r"^Content-Length:\s*(\d+)", re.IGNORECASE | re.MULTILINE,
+)
 _SUSPICIOUS_METHODS = {"TRACE", "TRACK", "DEBUG"}
 
 
@@ -503,8 +510,8 @@ def _check_host_risks(host):
     return risks
 
 
-def _build_payload(request_line, headers_str, body_bytes):
-    """Build a payload dict from raw request components."""
+def _parse_headers_list(headers_str):
+    """Parse a raw header string into a list of [name, value] pairs."""
     headers = []
     for line in headers_str.split("\r\n"):
         if not line:
@@ -515,20 +522,27 @@ def _build_payload(request_line, headers_str, body_bytes):
         elif ":" in line:
             name, value = line.split(":", 1)
             headers.append([name, value.lstrip()])
+    return headers
 
+
+def _encode_body(body_bytes):
+    """Encode body bytes for JSON logging. Returns (body, is_binary, truncated)."""
     truncated = len(body_bytes) > MAX_BODY_LOG
     body_chunk = body_bytes[:MAX_BODY_LOG]
-
     try:
         body = body_chunk.decode("utf-8")
-        body_is_binary = False
+        return body, False, truncated
     except UnicodeDecodeError:
         body = base64.b64encode(body_chunk).decode("ascii")
-        body_is_binary = True
+        return body, True, truncated
 
+
+def _build_payload(request_line, headers_str, body_bytes):
+    """Build a payload dict from raw request components."""
+    body, body_is_binary, truncated = _encode_body(body_bytes)
     return {
         "request_line": request_line,
-        "headers": headers,
+        "headers": _parse_headers_list(headers_str),
         "body": body,
         "body_is_binary": body_is_binary,
         "body_truncated": truncated,
@@ -537,30 +551,10 @@ def _build_payload(request_line, headers_str, body_bytes):
 
 def _build_response_payload(status_line, headers_str, body_bytes):
     """Build a response payload dict from raw response components."""
-    headers = []
-    for line in headers_str.split("\r\n"):
-        if not line:
-            continue
-        if ": " in line:
-            name, value = line.split(": ", 1)
-            headers.append([name, value])
-        elif ":" in line:
-            name, value = line.split(":", 1)
-            headers.append([name, value.lstrip()])
-
-    truncated = len(body_bytes) > MAX_BODY_LOG
-    body_chunk = body_bytes[:MAX_BODY_LOG]
-
-    try:
-        body = body_chunk.decode("utf-8")
-        body_is_binary = False
-    except UnicodeDecodeError:
-        body = base64.b64encode(body_chunk).decode("ascii")
-        body_is_binary = True
-
+    body, body_is_binary, truncated = _encode_body(body_bytes)
     return {
         "status_line": status_line,
-        "headers": headers,
+        "headers": _parse_headers_list(headers_str),
         "body": body,
         "body_is_binary": body_is_binary,
         "body_truncated": truncated,
@@ -864,9 +858,7 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
     payload = _build_payload(request_line, header_rest, body_start)
 
     # Strip hop-by-hop Proxy-Connection header before forwarding
-    forwarded_headers = re.sub(
-        r"(?i)Proxy-Connection:[^\r\n]*\r\n", "", header_rest
-    )
+    forwarded_headers = _PROXY_CONN_RE.sub("", header_rest)
 
     try:
         remote_sock = socket.create_connection((host, port), timeout=10)
@@ -918,12 +910,12 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
 
 def _get_content_length(header_text):
     """Extract Content-Length from header text, or return 0."""
-    for line in header_text.split("\r\n"):
-        if line.lower().startswith("content-length:"):
-            try:
-                return int(line.split(":", 1)[1].strip())
-            except ValueError:
-                return 0
+    m = _CONTENT_LENGTH_RE.search(header_text)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return 0
     return 0
 
 
