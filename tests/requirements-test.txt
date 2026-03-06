@@ -1,0 +1,8 @@
+pytest>=8.0
+pytest-timeout>=2.2
+pytest-html>=4.1
+testcontainers>=4.0
+requests>=2.31
+pytest-httpserver>=1.0
+playwright>=1.40
+cryptography>=42.0
