@@ -1,0 +1,326 @@
+openapi: 3.1.0
+info:
+  title: MITM Web Proxy — Log Viewer API
+  version: 1.0.0
+  description: |
+    REST API for the MITM web proxy log viewer. Provides paginated,
+    filterable access to structured proxy log entries including request/response
+    payloads, security risk detections, and sensitive data findings.
+
+    The viewer runs on port 9999 (configurable via `VIEWER_PORT`) inside the
+    same container as the proxy.
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:9999
+    description: Local (Docker default)
+
+paths:
+  /:
+    get:
+      operationId: listEndpoints
+      summary: List available endpoints
+      responses:
+        "200":
+          description: Endpoint directory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  endpoints:
+                    type: object
+                    additionalProperties:
+                      type: string
+                example:
+                  endpoints:
+                    "GET /api/logs": "Paginated proxy logs (query: page, limit, start, end, method, url, severity)"
+                    "GET /ui/logs": "Log viewer UI"
+                    "GET /health": "Health check"
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+              example:
+                status: ok
+
+  /api/logs:
+    get:
+      operationId: queryLogs
+      summary: Query proxy log entries
+      description: |
+        Returns paginated, filterable proxy log entries. Entries are read from
+        the JSONL log file written by the proxy (`/tmp/proxy.log` by default).
+        All filters are optional and can be combined.
+      parameters:
+        - name: page
+          in: query
+          description: Page number (1-indexed). Values below 1 are clamped to 1.
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Results per page. Clamped to the range 1–1000.
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 1000
+        - name: start
+          in: query
+          description: ISO 8601 start time (inclusive). Only entries at or after this timestamp are returned.
+          schema:
+            type: string
+            format: date-time
+          example: "2026-03-03T00:00:00Z"
+        - name: end
+          in: query
+          description: ISO 8601 end time (inclusive). Only entries at or before this timestamp are returned.
+          schema:
+            type: string
+            format: date-time
+          example: "2026-03-03T23:59:59Z"
+        - name: method
+          in: query
+          description: HTTP method filter (case-insensitive exact match).
+          schema:
+            type: string
+          example: GET
+        - name: url
+          in: query
+          description: URL substring search (case-insensitive). Matches against the `target` field.
+          schema:
+            type: string
+          example: example.com
+        - name: severity
+          in: query
+          description: Only return entries with at least one risk of this severity level.
+          schema:
+            type: string
+            enum: [HIGH, MEDIUM, LOW]
+      responses:
+        "200":
+          description: Paginated log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogResponse"
+
+  /ui/logs:
+    get:
+      operationId: viewerUI
+      summary: Log viewer web UI
+      description: Serves the browser-based log viewer HTML page.
+      responses:
+        "200":
+          description: HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+
+components:
+  schemas:
+    LogResponse:
+      type: object
+      required: [page, limit, total, entries]
+      properties:
+        page:
+          type: integer
+          description: Current page number (1-indexed).
+          example: 1
+        limit:
+          type: integer
+          description: Results per page.
+          example: 50
+        total:
+          type: integer
+          description: Total number of entries matching the filters (before pagination).
+          example: 123
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+
+    LogEntry:
+      type: object
+      required: [timestamp, client_ip, client_port, method, target, status, risks]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp (UTC).
+          example: "2026-03-03T21:54:47.145401+00:00"
+        client_ip:
+          type: string
+          description: Client IP address.
+          example: "172.24.0.1"
+        client_port:
+          type: integer
+          description: Client source port.
+          example: 39052
+        method:
+          type: string
+          description: HTTP method.
+          enum: [GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT, TRACE]
+          example: GET
+        target:
+          type: string
+          description: Full request URL, or `host:port` for CONNECT.
+          example: "http://example.com/api/data"
+        status:
+          type: string
+          description: |
+            HTTP status code or special proxy status:
+            - Standard codes: `200`, `301`, `404`, `502`, etc.
+            - `MITM` — CONNECT tunnel established with interception
+            - `502-upstream(...)` — TLS upstream connection failed
+            - `TLS-ERR(...)` — Client TLS handshake failed
+          example: "200"
+        risks:
+          type: array
+          description: Detected security risks (request patterns + response header checks). Empty array if none.
+          items:
+            $ref: "#/components/schemas/Risk"
+        payload:
+          description: Request payload. Absent for CONNECT without MITM.
+          $ref: "#/components/schemas/Payload"
+        response:
+          description: Response payload. Absent for CONNECT tunnel setup.
+          $ref: "#/components/schemas/ResponsePayload"
+        sensitive_data:
+          type: array
+          description: Sensitive data findings extracted from headers, URL, and body. Absent if none detected.
+          items:
+            $ref: "#/components/schemas/SensitiveDataFinding"
+
+    Risk:
+      type: object
+      required: [severity, description]
+      properties:
+        severity:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+          description: Risk severity level.
+          example: HIGH
+        description:
+          type: string
+          description: Human-readable risk description.
+          example: "SQL injection pattern: \"OR 1=1\""
+
+    Payload:
+      type: object
+      required: [request_line, headers, body, body_is_binary, body_truncated]
+      properties:
+        request_line:
+          type: string
+          description: Full HTTP request line.
+          example: "GET http://example.com/ HTTP/1.1"
+        headers:
+          type: array
+          description: Request header name-value pairs.
+          items:
+            type: array
+            prefixItems:
+              - type: string
+              - type: string
+            minItems: 2
+            maxItems: 2
+          example:
+            - ["Host", "example.com"]
+            - ["User-Agent", "curl/8.11.1"]
+        body:
+          type: string
+          description: Request body text, or base64-encoded string if binary.
+          example: "{\"user\":\"alice\"}"
+        body_is_binary:
+          type: boolean
+          description: "`true` if body is base64-encoded binary content."
+          example: false
+        body_truncated:
+          type: boolean
+          description: "`true` if body was truncated at 8 KB."
+          example: false
+
+    ResponsePayload:
+      type: object
+      required: [status_line, headers, body, body_is_binary, body_truncated]
+      properties:
+        status_line:
+          type: string
+          description: Full HTTP status line.
+          example: "HTTP/1.1 200 OK"
+        headers:
+          type: array
+          description: Response header name-value pairs.
+          items:
+            type: array
+            prefixItems:
+              - type: string
+              - type: string
+            minItems: 2
+            maxItems: 2
+          example:
+            - ["Content-Type", "application/json"]
+            - ["Content-Length", "42"]
+        body:
+          type: string
+          description: Response body text, or base64-encoded string if binary.
+          example: "{\"status\":\"ok\",\"id\":123}"
+        body_is_binary:
+          type: boolean
+          description: "`true` if body is base64-encoded binary content."
+          example: false
+        body_truncated:
+          type: boolean
+          description: "`true` if body was truncated at 8 KB."
+          example: false
+
+    SensitiveDataFinding:
+      type: object
+      required: [type, source, field_name, value]
+      properties:
+        type:
+          type: string
+          description: |
+            Category of sensitive data detected. One of:
+            `bearer_token`, `jwt`, `basic_auth`, `api_key`, `cookie`,
+            `set_cookie`, `session_token`, `url_param`, `form_password`,
+            `json_credential`, `email`, `phone`, `ssn`, `credit_card`,
+            `pem_key`, `aws_key`.
+          example: bearer_token
+        source:
+          type: string
+          description: |
+            Where the finding was detected:
+            `request_header`, `response_header`, `url`, `request_body`, `response_body`.
+          enum: [request_header, response_header, url, request_body, response_body]
+          example: request_header
+        field_name:
+          type: string
+          description: Name of the header, parameter, or field containing the sensitive data.
+          example: Authorization
+        value:
+          type: string
+          description: The sensitive value found (may be masked in the UI).
+          example: "Bearer eyJhbGciOi..."
+        decoded:
+          type: string
+          description: Decoded representation, if applicable (e.g., decoded JWT payload, decoded Basic auth credentials).
+          example: "{\"sub\":\"1234567890\",\"name\":\"John\"}"
