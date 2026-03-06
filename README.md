@@ -2,6 +2,21 @@
 
 A Python HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-middle), built-in security risk detection, request payload capture, and a web-based log viewer. Designed for development, debugging, and traffic inspection.
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start (Docker)](#quick-start-docker--recommended)
+- [Alternative: Manual Setup](#alternative-manual-setup-without-docker)
+- [Command-Line Reference](#command-line-reference)
+- [Operating Modes](#operating-modes)
+- [Security Risk Detection](#security-risk-detection)
+- [Log Viewer](#log-viewer)
+- [Log Format](#log-format)
+- [Certificate Management](#certificate-management)
+- [Testing](#testing)
+- [Project Structure](#project-structure)
+- [Security Considerations](#security-considerations)
+
 ## Features
 
 - **HTTP forwarding** — proxies plain HTTP requests with full method, URL, and header visibility
