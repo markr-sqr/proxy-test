@@ -4,6 +4,47 @@ Automated test suite for the MITM web proxy, covering the proxy engine (`proxy.p
 
 ---
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [1. Goals](#1-goals)
+- [2. Test Pyramid](#2-test-pyramid)
+- [3. Test Types](#3-test-types)
+  - [3.1 Unit Tests](#31-unit-tests--testsregressiontest_helperspy)
+  - [3.2 Smoke Tests](#32-smoke-tests--testssmoketest_smokepy)
+  - [3.3 Sensitive Data Extraction](#33-regression-sensitive-data-extraction--testsregressiontest_sensitive_datapy)
+  - [3.4 Security Detection](#34-regression-security-detection--testsregressiontest_security_detectionpy)
+  - [3.5 Proxy Core](#35-regression-proxy-core--testsregressiontest_proxy_corepy)
+  - [3.6 Viewer API](#36-regression-viewer-api--testsregressiontest_viewer_apipy)
+  - [3.7 UI (Playwright)](#37-regression-ui-playwright--testsregressiontest_ui_viewerpy)
+- [4. Architecture](#4-architecture)
+  - [4.1 Container Management](#41-container-management)
+  - [4.2 Upstream Test Server](#42-upstream-test-server)
+  - [4.3 Log Polling](#43-log-polling)
+  - [4.4 MITM / HTTPS Tests](#44-mitm--https-tests)
+  - [4.5 Playwright Browser](#45-playwright-browser)
+  - [4.6 Test Isolation](#46-test-isolation)
+- [5. Fixture Reference](#5-fixture-reference)
+- [6. Execution](#6-execution)
+  - [6.1 Prerequisites](#61-prerequisites)
+  - [6.2 Docker Socket Permissions](#62-docker-socket-permissions)
+  - [6.3 Quick Start — Three Scripts](#63-quick-start--three-scripts)
+  - [6.4 Run Scripts in Detail](#64-run-scripts-in-detail)
+  - [6.5 Selective Execution](#65-selective-execution)
+  - [6.6 Pytest Markers](#66-pytest-markers)
+  - [6.7 Passing Extra Arguments](#67-passing-extra-arguments)
+- [7. Reporting](#7-reporting)
+  - [7.1 HTML Report](#71-html-report-pytest-html)
+  - [7.2 JUnit XML](#72-junit-xml)
+  - [7.3 Report Locations](#73-report-locations)
+  - [7.4 CI Integration Example](#74-ci-integration-example-github-actions)
+- [8. Dependencies](#8-dependencies)
+- [9. File Structure](#9-file-structure)
+- [10. Coverage Map](#10-coverage-map)
+- [11. Critical Success Factors](#11-critical-success-factors)
+
+---
+
 ## Quick Start
 
 ```bash
