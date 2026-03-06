@@ -81,6 +81,310 @@ _BODY_CRED_RE = re.compile(
     r"(?:^|&)(?:password|passwd|pass|credential|user_password|old_password|new_password)=[^&\s]+",
     re.IGNORECASE,
 )
+
+# ── Sensitive data detection patterns ────────────────────────────────────────
+_SENS_BEARER_RE = re.compile(
+    r"^Authorization:\s*Bearer\s+(\S+)", re.IGNORECASE | re.MULTILINE,
+)
+_SENS_BASIC_RE = re.compile(
+    r"^Authorization:\s*Basic\s+(\S+)", re.IGNORECASE | re.MULTILINE,
+)
+_SENS_APIKEY_HEADER_RE = re.compile(
+    r"^(X-Api-Key|Api-Key|Apikey):\s*(\S+)", re.IGNORECASE | re.MULTILINE,
+)
+_SENS_COOKIE_RE = re.compile(
+    r"^(Cookie|Set-Cookie):\s*(.+)", re.IGNORECASE | re.MULTILINE,
+)
+_SENS_JWT_RE = re.compile(
+    r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]*)?",
+)
+_SENS_EMAIL_RE = re.compile(
+    r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+)
+_SENS_PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)",
+)
+_SENS_SSN_RE = re.compile(
+    r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)",
+)
+_SENS_CC_RE = re.compile(
+    r"(?<!\d)(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})(?!\d)",
+)
+_SENS_PEM_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----",
+)
+_SENS_AWS_KEY_RE = re.compile(
+    r"(?<![A-Z0-9])((?:AKIA|ASIA)[A-Z0-9]{16})(?![A-Z0-9])",
+)
+_SENS_AWS_SECRET_RE = re.compile(
+    r"(?<![A-Za-z0-9/+=])([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])",
+)
+_SENS_URL_PARAM_RE = re.compile(
+    r"[?&](api_key|apikey|token|access_token|secret|password|passwd|session_id|sid)=([^&#\s]+)",
+    re.IGNORECASE,
+)
+_SENS_SESSION_HEADER_RE = re.compile(
+    r"^(X-Session-Token|X-Auth-Token|X-CSRF-Token):\s*(\S+)", re.IGNORECASE | re.MULTILINE,
+)
+_SENS_BODY_PASS_RE = re.compile(
+    r"(?:^|&)(password|passwd|pass|credential|secret|old_password|new_password)=([^&\s]+)",
+    re.IGNORECASE,
+)
+_SENS_BODY_JSON_RE = re.compile(
+    r'"(password|passwd|secret|token|api_key|apikey|access_token|private_key|credential|ssn|credit_card)"\s*:\s*"([^"]+)"',
+    re.IGNORECASE,
+)
+
+
+def _decode_jwt(token):
+    """Decode JWT header and payload (no signature verification)."""
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        # Pad base64url
+        def _b64pad(s):
+            s = s.replace("-", "+").replace("_", "/")
+            pad = 4 - len(s) % 4
+            if pad != 4:
+                s += "=" * pad
+            return s
+
+        header = json.loads(base64.b64decode(_b64pad(parts[0])).decode("utf-8", errors="replace"))
+        payload = json.loads(base64.b64decode(_b64pad(parts[1])).decode("utf-8", errors="replace"))
+        return json.dumps({"header": header, "payload": payload}, indent=2)
+    except Exception:
+        return None
+
+
+def _decode_basic_auth(b64):
+    """Decode Basic auth base64 to username:password."""
+    try:
+        return base64.b64decode(b64).decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+
+def _luhn_check(digits):
+    """Validate a credit card number using the Luhn algorithm."""
+    try:
+        nums = [int(d) for d in digits if d.isdigit()]
+        if len(nums) < 13 or len(nums) > 19:
+            return False
+        total = 0
+        for i, n in enumerate(reversed(nums)):
+            if i % 2 == 1:
+                n *= 2
+                if n > 9:
+                    n -= 9
+            total += n
+        return total % 10 == 0
+    except Exception:
+        return False
+
+
+def _scan_headers(headers_str, source, findings):
+    """Extract sensitive data from headers."""
+    # Bearer token
+    m = _SENS_BEARER_RE.search(headers_str)
+    if m:
+        token = m.group(1)
+        finding = {
+            "type": "bearer_token", "source": source,
+            "field_name": "Authorization", "value": token,
+        }
+        # Check if JWT
+        decoded = _decode_jwt(token) if token.startswith("eyJ") else None
+        if decoded:
+            finding["type"] = "jwt"
+            finding["decoded"] = decoded
+        findings.append(finding)
+
+    # Basic auth
+    m = _SENS_BASIC_RE.search(headers_str)
+    if m:
+        b64 = m.group(1)
+        finding = {
+            "type": "basic_auth", "source": source,
+            "field_name": "Authorization", "value": b64,
+        }
+        decoded = _decode_basic_auth(b64)
+        if decoded:
+            finding["decoded"] = decoded
+        findings.append(finding)
+
+    # API key headers
+    for m in _SENS_APIKEY_HEADER_RE.finditer(headers_str):
+        findings.append({
+            "type": "api_key", "source": source,
+            "field_name": m.group(1), "value": m.group(2),
+        })
+
+    # Cookie / Set-Cookie
+    for m in _SENS_COOKIE_RE.finditer(headers_str):
+        findings.append({
+            "type": "cookie", "source": source,
+            "field_name": m.group(1), "value": m.group(2),
+        })
+
+    # Session headers
+    for m in _SENS_SESSION_HEADER_RE.finditer(headers_str):
+        findings.append({
+            "type": "session_token", "source": source,
+            "field_name": m.group(1), "value": m.group(2),
+        })
+
+
+def _scan_url(url, findings):
+    """Extract sensitive data from URL query parameters."""
+    for m in _SENS_URL_PARAM_RE.finditer(url):
+        param_name = m.group(1)
+        param_val = m.group(2)
+        typ = "api_key"
+        if param_name.lower() in ("password", "passwd"):
+            typ = "password"
+        elif param_name.lower() in ("token", "access_token"):
+            typ = "bearer_token"
+        elif param_name.lower() in ("session_id", "sid"):
+            typ = "session_token"
+        findings.append({
+            "type": typ, "source": "request_url",
+            "field_name": param_name, "value": param_val,
+        })
+
+
+def _scan_body(body, source, findings):
+    """Extract sensitive data from request/response body."""
+    if not body or len(body) < 4:
+        return
+    # Skip binary content (high ratio of non-printable chars)
+    sample = body[:512]
+    non_print = sum(1 for c in sample if ord(c) < 32 and c not in "\r\n\t")
+    if non_print > len(sample) * 0.3:
+        return
+
+    # Form-encoded passwords
+    for m in _SENS_BODY_PASS_RE.finditer(body):
+        findings.append({
+            "type": "password", "source": source,
+            "field_name": m.group(1), "value": m.group(2),
+        })
+
+    # JSON credential fields
+    for m in _SENS_BODY_JSON_RE.finditer(body):
+        field = m.group(1).lower()
+        typ = "password"
+        if field in ("token", "access_token"):
+            typ = "bearer_token"
+        elif field in ("api_key", "apikey"):
+            typ = "api_key"
+        elif field in ("secret", "private_key"):
+            typ = "private_key"
+        elif field == "ssn":
+            typ = "ssn"
+        elif field == "credit_card":
+            typ = "credit_card"
+        findings.append({
+            "type": typ, "source": source,
+            "field_name": m.group(1), "value": m.group(2),
+        })
+
+    # JWT in body
+    for m in _SENS_JWT_RE.finditer(body):
+        decoded = _decode_jwt(m.group())
+        finding = {
+            "type": "jwt", "source": source,
+            "field_name": "jwt_token", "value": m.group(),
+        }
+        if decoded:
+            finding["decoded"] = decoded
+        findings.append(finding)
+
+    # Email
+    for m in _SENS_EMAIL_RE.finditer(body):
+        findings.append({
+            "type": "email", "source": source,
+            "field_name": "email", "value": m.group(),
+        })
+
+    # Phone
+    for m in _SENS_PHONE_RE.finditer(body):
+        findings.append({
+            "type": "phone", "source": source,
+            "field_name": "phone", "value": m.group(),
+        })
+
+    # SSN
+    for m in _SENS_SSN_RE.finditer(body):
+        findings.append({
+            "type": "ssn", "source": source,
+            "field_name": "ssn", "value": m.group(),
+        })
+
+    # Credit card (with Luhn check)
+    for m in _SENS_CC_RE.finditer(body):
+        digits = re.sub(r"[\s-]", "", m.group(1))
+        if _luhn_check(digits):
+            findings.append({
+                "type": "credit_card", "source": source,
+                "field_name": "credit_card", "value": m.group(1),
+            })
+
+    # PEM private key
+    if _SENS_PEM_RE.search(body):
+        findings.append({
+            "type": "private_key", "source": source,
+            "field_name": "private_key", "value": "(PEM private key detected)",
+        })
+
+    # AWS access key
+    for m in _SENS_AWS_KEY_RE.finditer(body):
+        findings.append({
+            "type": "aws_credentials", "source": source,
+            "field_name": "aws_access_key", "value": m.group(1),
+        })
+
+    # AWS secret (only flag near known context to reduce false positives)
+    if "aws" in body.lower() or "AKIA" in body or "ASIA" in body:
+        for m in _SENS_AWS_SECRET_RE.finditer(body):
+            findings.append({
+                "type": "aws_credentials", "source": source,
+                "field_name": "aws_secret_key", "value": m.group(1),
+            })
+
+
+def _headers_from_payload(payload_dict):
+    """Reconstruct header string from parsed header pairs."""
+    if not payload_dict or "headers" not in payload_dict:
+        return ""
+    return "\r\n".join(f"{h[0]}: {h[1]}" for h in payload_dict["headers"])
+
+
+def _extract_sensitive_data(url, req_headers, req_body, resp_headers="", resp_body=""):
+    """Scan request and response for sensitive data.
+
+    Returns a list of finding dicts.
+    """
+    findings = []
+    _scan_headers(req_headers, "request_header", findings)
+    _scan_url(url, findings)
+    _scan_body(req_body, "request_body", findings)
+    if resp_headers:
+        _scan_headers(resp_headers, "response_header", findings)
+    if resp_body:
+        _scan_body(resp_body, "response_body", findings)
+
+    # Deduplicate by (type, source, value)
+    seen = set()
+    unique = []
+    for f in findings:
+        key = (f["type"], f["source"], f["value"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+    return unique
+
+
 _SUSPICIOUS_METHODS = {"TRACE", "TRACK", "DEBUG"}
 
 
@@ -284,7 +588,7 @@ def _parse_response(data):
 
 
 def log_request(client_addr, method, target, status="->", risks=None, payload=None,
-                response=None):
+                response=None, sensitive_data=None):
     """Log a request to stdout and append a JSONL line to LOG_FILE."""
     if risks is None:
         risks = []
@@ -296,6 +600,10 @@ def log_request(client_addr, method, target, status="->", risks=None, payload=No
         for severity, desc in risks:
             colour = _SEVERITY_COLOUR.get(severity, "")
             print(f"  {colour}\u26a0 [{severity}] {desc}{RESET}")
+        if sensitive_data:
+            print(f"  {YELLOW}\U0001f512 {len(sensitive_data)} sensitive data finding(s){RESET}")
+            for sd in sensitive_data:
+                print(f"    {sd['type']}: {sd['field_name']} [{sd['source']}]")
 
         entry = {
             "timestamp": ts.isoformat(),
@@ -310,6 +618,8 @@ def log_request(client_addr, method, target, status="->", risks=None, payload=No
             entry["payload"] = payload
         if response is not None:
             entry["response"] = response
+        if sensitive_data:
+            entry["sensitive_data"] = sensitive_data
         try:
             with open(LOG_FILE, "a") as f:
                 f.write(json.dumps(entry) + "\n")
@@ -405,13 +715,25 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
                 resp_risks = _check_response_risks(resp_headers, full_url)
                 all_risks = risks + resp_risks
                 resp_payload = _build_response_payload(status_line, resp_headers, resp_body)
+                req_hdrs = _headers_from_payload(payload) if payload else ""
+                req_body = payload.get("body", "") if payload else ""
+                resp_body_text = resp_body.decode("utf-8", errors="replace") if resp_body else ""
+                sens = _extract_sensitive_data(full_url, req_hdrs, req_body, resp_headers, resp_body_text)
                 log_request(addr, method, full_url, status_code, all_risks, payload=payload,
-                            response=resp_payload)
+                            response=resp_payload, sensitive_data=sens or None)
             else:
-                log_request(addr, method, full_url, "MITM", risks, payload=payload)
+                req_hdrs = _headers_from_payload(payload) if payload else ""
+                req_body = payload.get("body", "") if payload else ""
+                sens = _extract_sensitive_data(full_url, req_hdrs, req_body)
+                log_request(addr, method, full_url, "MITM", risks, payload=payload,
+                            sensitive_data=sens or None)
         elif pending_req:
             method, full_url, risks, payload = pending_req
-            log_request(addr, method, full_url, "MITM", risks, payload=payload)
+            req_hdrs = _headers_from_payload(payload) if payload else ""
+            req_body = payload.get("body", "") if payload else ""
+            sens = _extract_sensitive_data(full_url, req_hdrs, req_body)
+            log_request(addr, method, full_url, "MITM", risks, payload=payload,
+                        sensitive_data=sens or None)
         pending_req = None
         response_buf = b""
 
@@ -549,7 +871,9 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
     try:
         remote_sock = socket.create_connection((host, port), timeout=10)
     except Exception as e:
-        log_request(addr, method, url, "502", risks, payload=payload)
+        sens = _extract_sensitive_data(url, header_rest, body_text)
+        log_request(addr, method, url, "502", risks, payload=payload,
+                    sensitive_data=sens or None)
         client_sock.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
         client_sock.close()
         return
@@ -579,10 +903,14 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
             resp_risks = _check_response_risks(resp_headers, url)
             all_risks = risks + resp_risks
             resp_payload = _build_response_payload(status_line, resp_headers, resp_body)
+            resp_body_text = resp_body.decode("utf-8", errors="replace") if resp_body else ""
+            sens = _extract_sensitive_data(url, header_rest, body_text, resp_headers, resp_body_text)
             log_request(addr, method, url, status_code, all_risks, payload=payload,
-                        response=resp_payload)
+                        response=resp_payload, sensitive_data=sens or None)
         else:
-            log_request(addr, method, url, "->", risks, payload=payload)
+            sens = _extract_sensitive_data(url, header_rest, body_text)
+            log_request(addr, method, url, "->", risks, payload=payload,
+                        sensitive_data=sens or None)
     finally:
         remote_sock.close()
         client_sock.close()

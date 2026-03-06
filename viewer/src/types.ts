@@ -19,6 +19,14 @@ export interface ResponsePayload {
   body_truncated: boolean;
 }
 
+export interface SensitiveDataFinding {
+  type: string;
+  source: string;
+  field_name: string;
+  value: string;
+  decoded?: string;
+}
+
 export interface LogEntry {
   timestamp: string;
   client_ip: string;
@@ -29,6 +37,7 @@ export interface LogEntry {
   risks: Risk[];
   payload?: Payload;
   response?: ResponsePayload;
+  sensitive_data?: SensitiveDataFinding[];
 }
 
 export interface LogQuery {
