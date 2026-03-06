@@ -542,3 +542,95 @@ How the test suite maps to project source files:
 | `viewer/src/index.ts` — `/health`, `/api/logs` | Smoke tests (S2, S6), viewer API tests |
 | `viewer/src/public/logs.html` — UI rendering | Playwright tests (UI1-UI4) |
 | `Dockerfile` + `entrypoint.sh` — container build and startup | All integration tests (container fixture) |
+
+---
+
+## 11. Critical Success Factors
+
+### 11.1 Container Builds and Starts Cleanly
+
+The Docker image must build from the project `Dockerfile` without errors and
+the container must start with both services (proxy on 8080, viewer on 9999)
+healthy within 40 seconds. If the image fails to build or a service does not
+start, every integration and smoke test fails. The `proxy_container` fixture
+enforces this with a TCP + HTTP health check gate.
+
+**Pass criteria:** `docker build` exits 0; proxy port accepts TCP; `GET /health` returns 200.
+
+### 11.2 No Port Conflicts
+
+All host-side ports (proxy, viewer, upstream test server) are mapped to random
+ephemeral ports. Tests must never hardcode ports. This ensures parallel test
+runs and CI jobs do not collide.
+
+**Pass criteria:** No `Address already in use` errors across repeated runs.
+
+### 11.3 Test Isolation
+
+Every test generates a unique UUID-based URL slug and queries logs only for
+that slug. Tests must not depend on execution order, shared log state, or
+side effects from other tests. A single shared container is acceptable only
+because isolation is enforced at the URL path level.
+
+**Pass criteria:** Any single test passes when run in isolation (`-k test_name`); full suite passes regardless of execution order.
+
+### 11.4 All Sensitive Data Patterns Detected
+
+Each of the 16 sensitive-data regex patterns in `proxy.py` has at least one
+dedicated test (R1-R19) that sends a crafted payload through the proxy and
+asserts the correct `type`, `source`, and (where applicable) `decoded` value
+appears in the log entry's `sensitive_data` array.
+
+**Pass criteria:** R1-R19 all pass; no new pattern is added to `proxy.py` without a corresponding test.
+
+### 11.5 All Attack Patterns Detected with Correct Severity
+
+Each security risk detector (`_check_risks`, `_check_response_risks`) has a
+test (R20-R27) that asserts both the detection and the expected severity level
+(HIGH, MEDIUM, or LOW). False-positive tests (R26, R27) confirm that benign
+responses do not trigger risks.
+
+**Pass criteria:** R20-R27 all pass; no HIGH-severity risk goes undetected; no false positives on non-HTML or HTTP-only targets.
+
+### 11.6 Proxy Does Not Alter Client Traffic
+
+The proxy must forward request bodies, strip only hop-by-hop headers
+(`Proxy-Connection`), and return upstream responses intact. Body truncation
+and base64 encoding apply only to the *log entry*, not to the data relayed
+to the client.
+
+**Pass criteria:** R28 (header stripping), R29 (body forwarding), R30-R31 (log truncation/encoding do not affect client response).
+
+### 11.7 Viewer API Returns Accurate, Filtered Results
+
+The `/api/logs` endpoint must correctly filter by method, URL substring, and
+severity; paginate with accurate `total`/`page`/`limit`; and survive malformed
+JSONL lines without crashing.
+
+**Pass criteria:** R36-R41 all pass; pagination math is correct; malformed input does not produce 500 errors.
+
+### 11.8 UI Renders and Is Interactive
+
+The Playwright tests confirm that the viewer HTML loads, displays log entries
+in a table, expands detail rows on click, shows sensitive data with a working
+Reveal/Hide toggle, and opens the sensitive data summary modal.
+
+**Pass criteria:** UI1-UI4 all pass in headless Chromium.
+
+### 11.9 Reports Are Generated on Every Run
+
+Both HTML and JUnit XML reports must be written after every test run,
+including when tests fail. CI pipelines depend on the JUnit XML for result
+parsing, and developers depend on the HTML report for post-run review.
+
+**Pass criteria:** `tests/reports/` contains the expected report files after both `run_smoke.sh` and `run_regression.sh`, regardless of pass/fail outcome.
+
+### 11.10 Zero Impact on Production Artefacts
+
+The test suite must not modify any file that enters the Docker image
+(`proxy.py`, `mitm_certs.py`, `entrypoint.sh`, `viewer/`, `Dockerfile`,
+`requirements.txt`). All test code, dependencies, and configuration live
+under `tests/` and `.venv-test/`, both of which are gitignored from the
+container build context.
+
+**Pass criteria:** `docker build` produces an identical image whether or not the test suite is present.
