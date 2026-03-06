@@ -7,9 +7,9 @@ A Python HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-mid
 - **HTTP forwarding** — proxies plain HTTP requests with full method, URL, and header visibility
 - **HTTPS passthrough** — tunnels encrypted connections without inspection via CONNECT
 - **MITM interception** — decrypts, logs, and re-encrypts HTTPS traffic using on-the-fly certificate generation
-- **Security scanning** — inspects proxied requests for common attack patterns and authentication issues, logging colour-coded warnings in real time
-- **Payload capture** — logs full request headers and bodies (up to 8 KB), with auto-detection of binary content
-- **Web log viewer** — browser-based UI with filtering, pagination, payload inspection, and auto-decoding of base64, JWT, URL-encoded, and hex-encoded data
+- **Security scanning** — inspects proxied requests for common attack patterns and authentication issues, plus response headers for missing security headers, logging colour-coded warnings in real time
+- **Payload capture** — logs full request and response headers and bodies (up to 8 KB each), with auto-detection of binary content
+- **Web log viewer** — browser-based UI with filtering, sortable columns, pagination, scope-based target filtering, payload inspection, settings/dashboard modals, and auto-decoding of base64, JWT, URL-encoded, and hex-encoded data
 - **Zero-config certificate management** — auto-generates a CA and per-host certificates on first use, caches them on disk
 
 ## Quick Start (Docker — Recommended)
@@ -51,8 +51,8 @@ Override defaults with environment variables:
 |----------|---------|-------------|
 | `PROXY_PORT` | `8080` | Host port for the proxy |
 | `VIEWER_PORT` | `9999` | Host port for the log viewer |
-| `PROXY_UID` | `1000` | UID the container runs as |
-| `PROXY_GID` | `1000` | GID the container runs as |
+| `PROXY_UID` | `1001` | UID the container runs as |
+| `PROXY_GID` | `972` | GID the container runs as |
 
 ```bash
 # Example: custom ports
@@ -154,24 +154,37 @@ Same as MITM but the proxy skips certificate verification when connecting upstre
 
 ## Security Risk Detection
 
-The proxy automatically inspects every proxied request and logs colour-coded warnings when it detects suspicious patterns. Checks run against URLs, headers, and (where visible) request bodies.
+The proxy automatically inspects every proxied request and response, logging colour-coded warnings when it detects suspicious patterns. Request checks run against URLs and bodies; response checks inspect headers for missing security headers (HTML responses only).
 
-### Detection Table
+### Request Detection
 
-| Category | Severity | Colour | What it detects |
-|----------|----------|--------|-----------------|
-| SQL Injection | HIGH | Red | `UNION SELECT`, `OR 1=1`, `' OR '`, `DROP TABLE`, `--` comments, `;` chaining |
-| XSS | HIGH | Red | `<script>`, `javascript:`, `onerror=`, `onload=`, `eval(`, `document.cookie` |
-| Path Traversal | HIGH | Red | `../`, `..%2f`, `..%5c`, `%2e%2e` in URL path |
-| Command Injection | HIGH | Red | Backticks, `$(`, `; `, `| `, `&& ` in query params or headers |
-| Plaintext Basic Auth | HIGH | Red | `Authorization: Basic` header sent over HTTP |
-| Plaintext Bearer Token | HIGH | Red | `Authorization: Bearer` header sent over HTTP |
-| Plaintext Body Credentials | HIGH | Red | `password=`, `passwd=`, `pass=`, `credential=` etc. in POST body over HTTP |
-| Sensitive Data in URL | MEDIUM | Yellow | `password=`, `secret=`, `api_key=`, `token=` etc. in query string |
-| Cleartext Auth Endpoint | MEDIUM | Yellow | HTTP (not HTTPS) request to `/login`, `/auth`, `/signin` |
-| Proxy-Authorization | MEDIUM | Yellow | `Proxy-Authorization` header exposing proxy credentials |
-| SSRF Indicators | MEDIUM | Yellow | Requests targeting private IPs (`10.x`, `172.16-31.x`, `192.168.x`, `127.x`, `169.254.x`, `localhost`) |
-| Suspicious Methods | LOW | Cyan | `TRACE`, `TRACK`, `DEBUG` HTTP methods |
+| Category | Severity | What it detects |
+|----------|----------|-----------------|
+| SQL Injection | HIGH | `UNION SELECT`, `OR 1=1`, `' OR '`, `DROP TABLE`, `;--` comments |
+| XSS | HIGH | `<script>`, `javascript:`, `onerror=`, `onload=`, `eval(`, `document.cookie` |
+| Path Traversal | HIGH | `../`, `..%2f`, `..%5c`, `%2e%2e` in URL path |
+| Command Injection | HIGH | Backtick commands, `$(`, `&&`, `|` piping |
+| Plaintext Basic Auth | HIGH | `Authorization: Basic` header sent over HTTP |
+| Plaintext Bearer Token | HIGH | `Authorization: Bearer` header sent over HTTP |
+| Plaintext Body Credentials | HIGH | `password=`, `passwd=`, `pass=`, `credential=` etc. in POST body over HTTP |
+| Sensitive Data in URL | MEDIUM | `password=`, `secret=`, `api_key=`, `token=` etc. in query string |
+| Cleartext Auth Endpoint | MEDIUM | HTTP (not HTTPS) request to `/login`, `/auth`, `/signin` |
+| Proxy-Authorization | MEDIUM | `Proxy-Authorization` header exposing proxy credentials |
+| SSRF Indicators | MEDIUM | Requests targeting private IPs (`10.x`, `172.16-31.x`, `192.168.x`, `127.x`, `169.254.x`, `localhost`) |
+| Suspicious Methods | LOW | `TRACE`, `TRACK`, `DEBUG` HTTP methods |
+
+### Response Security Header Detection
+
+Checked on HTML responses (`Content-Type: text/html`) only:
+
+| Missing Header | Severity | Notes |
+|----------------|----------|-------|
+| `Strict-Transport-Security` | HIGH | HTTPS responses only |
+| `Content-Security-Policy` | MEDIUM | |
+| `X-Content-Type-Options` | LOW | |
+| `X-Frame-Options` | LOW | |
+| `Referrer-Policy` | LOW | |
+| `Permissions-Policy` | LOW | |
 
 ### Visibility by Mode
 
@@ -199,7 +212,10 @@ HIGH warnings appear in bright red, MEDIUM in yellow, LOW in cyan.
 
 The log viewer runs on port 9999 (configurable via `VIEWER_PORT`) and provides:
 
-- **Web UI** at `/ui/logs` — table view with expandable rows, content-type badges, payload inspection, image previews, and auto-decoding of encoded data
+- **Web UI** at `/ui/logs` — full-width table with sortable columns, expandable detail rows, content-type badges, request and response payload inspection, image previews, and auto-decoding of encoded data
+- **Settings modal** — configurable auto-refresh interval, font size, rows per page, compact view (persisted to localStorage)
+- **Dashboard modal** — traffic over time, requests by method, status codes, top targets, risk breakdown (pure CSS charts)
+- **Scope modal** — wildcard target filtering with per-row quick-add button; filters take effect immediately
 - **REST API** at `/api/logs` — paginated, filterable JSON endpoint
 
 See [LOG_SERVICE.md](LOG_SERVICE.md) for full API documentation.
@@ -223,9 +239,10 @@ Each request is also logged as a JSON line with full payload data:
 | `client_port` | int | Client source port |
 | `method` | string | HTTP method |
 | `target` | string | Full request URL or `host:port` for CONNECT |
-| `status` | string | Result status (`200`, `502`, `MITM`, etc.) |
-| `risks` | Risk[] | Detected security risks |
+| `status` | string | HTTP status code (`200`, `404`, `502`, etc.) or `MITM` for tunnel setup |
+| `risks` | Risk[] | Detected security risks (request + response) |
 | `payload` | Payload? | Request payload (headers + body), if available |
+| `response` | Response? | Response payload (status line + headers + body), if available |
 
 ### Payload object
 
@@ -237,13 +254,23 @@ Each request is also logged as a JSON line with full payload data:
 | `body_is_binary` | boolean | Whether body is base64-encoded binary |
 | `body_truncated` | boolean | Whether body was truncated at 8 KB |
 
+### Response object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status_line` | string | Full HTTP status line (e.g., `HTTP/1.1 200 OK`) |
+| `headers` | [string, string][] | Response header name-value pairs |
+| `body` | string | Response body (UTF-8 text, or base64 for binary) |
+| `body_is_binary` | boolean | Whether body is base64-encoded binary |
+| `body_truncated` | boolean | Whether body was truncated at 8 KB |
+
 ### Status values
 
 | Status | Meaning |
 |--------|---------|
-| `200` | Forwarded successfully |
+| `200`, `301`, `404`, etc. | Actual HTTP status code from upstream |
 | `502` | Upstream unreachable |
-| `MITM` | Decrypted HTTPS request |
+| `MITM` | CONNECT tunnel established with interception |
 | `502-upstream(...)` | Upstream TLS failure |
 | `TLS-ERR(...)` | Client TLS handshake failure |
 

@@ -24,7 +24,7 @@ cd viewer && npm install && npx tsc && node dist/index.js
 
 ## How It Works
 
-The proxy writes every request as a JSON line to `/tmp/proxy.log` (configurable via `PROXY_LOG_FILE` env var). The log viewer reads this file and serves it through a REST API with filtering and pagination. The web UI at `/ui/logs` provides an interactive table with expandable rows, payload inspection, image previews, and auto-decoding of encoded data.
+The proxy writes every request/response pair as a JSON line to `/tmp/proxy.log` (configurable via `PROXY_LOG_FILE` env var). The log viewer reads this file and serves it through a REST API with filtering and pagination. The web UI at `/ui/logs` provides a full-width sortable table with expandable detail rows showing request and response payloads, image previews, auto-decoding, scope-based target filtering, a settings modal, and a traffic dashboard.
 
 ## Endpoints
 
@@ -82,6 +82,16 @@ Returns paginated, filterable proxy log entries.
         "body": "{\"user\":\"alice\",\"role\":\"admin\"}",
         "body_is_binary": false,
         "body_truncated": false
+      },
+      "response": {
+        "status_line": "HTTP/1.1 200 OK",
+        "headers": [
+          ["Content-Type", "application/json"],
+          ["Content-Length", "42"]
+        ],
+        "body": "{\"status\":\"ok\",\"id\":123}",
+        "body_is_binary": false,
+        "body_truncated": false
       }
     },
     {
@@ -89,21 +99,35 @@ Returns paginated, filterable proxy log entries.
       "client_ip": "172.24.0.1",
       "client_port": 43754,
       "method": "GET",
-      "target": "http://example.com/?password=secret",
+      "target": "http://example.com/",
       "status": "200",
       "risks": [
         {
           "severity": "MEDIUM",
-          "description": "Sensitive data in URL: password="
+          "description": "Missing Content-Security-Policy (CSP) header"
+        },
+        {
+          "severity": "LOW",
+          "description": "Missing X-Content-Type-Options header"
         }
       ],
       "payload": {
-        "request_line": "GET http://example.com/?password=secret HTTP/1.1",
+        "request_line": "GET http://example.com/ HTTP/1.1",
         "headers": [
           ["Host", "example.com"],
           ["User-Agent", "curl/8.11.1"]
         ],
         "body": "",
+        "body_is_binary": false,
+        "body_truncated": false
+      },
+      "response": {
+        "status_line": "HTTP/1.1 200 OK",
+        "headers": [
+          ["Content-Type", "text/html"],
+          ["Content-Length", "1256"]
+        ],
+        "body": "<!doctype html>...",
         "body_is_binary": false,
         "body_truncated": false
       }
@@ -123,9 +147,10 @@ Each entry in the JSONL file (and in API responses) has the following fields:
 | `client_port` | int       | Client source port                             |
 | `method`      | string    | HTTP method (`GET`, `POST`, `CONNECT`, etc.)   |
 | `target`      | string    | Full request URL or `host:port` for CONNECT    |
-| `status`      | string    | Result status (`200`, `502`, `MITM`, etc.)     |
-| `risks`       | Risk[]    | Detected security risks (may be empty)         |
+| `status`      | string    | HTTP status code (`200`, `404`, `502`, etc.) or `MITM` for tunnel setup |
+| `risks`       | Risk[]    | Detected security risks — request patterns + response header checks (may be empty) |
 | `payload`     | Payload?  | Request payload, if available (absent for CONNECT without MITM) |
+| `response`    | Response? | Response payload, if available (absent for CONNECT tunnel setup) |
 
 ### Risk Object
 
@@ -141,6 +166,16 @@ Each entry in the JSONL file (and in API responses) has the following fields:
 | `request_line`   | string             | Full HTTP request line (e.g., `GET http://... HTTP/1.1`) |
 | `headers`        | [string, string][] | Header name-value pairs                            |
 | `body`           | string             | Request body text, or base64-encoded if binary     |
+| `body_is_binary` | boolean            | `true` if body is base64-encoded binary content    |
+| `body_truncated` | boolean            | `true` if body was truncated at 8 KB               |
+
+### Response Object
+
+| Field            | Type               | Description                                        |
+|------------------|--------------------|----------------------------------------------------|
+| `status_line`    | string             | Full HTTP status line (e.g., `HTTP/1.1 200 OK`)   |
+| `headers`        | [string, string][] | Response header name-value pairs                   |
+| `body`           | string             | Response body text, or base64-encoded if binary    |
 | `body_is_binary` | boolean            | `true` if body is base64-encoded binary content    |
 | `body_truncated` | boolean            | `true` if body was truncated at 8 KB               |
 

@@ -1562,38 +1562,41 @@
   });
 
   function render(data) {
-    totalEntries = data.total;
-    var entries = data.entries;
+    var allEntries = data.entries;
 
     // Apply scope filter client-side
     if (!isScopeAll(scopePatterns)) {
-      entries = entries.filter(function(e) { return matchesScope(e.target, scopePatterns); });
+      allEntries = allEntries.filter(function(e) { return matchesScope(e.target, scopePatterns); });
     }
 
     // Apply sort
-    entries = sortEntries(entries);
+    allEntries = sortEntries(allEntries);
 
-    var start = (data.page - 1) * data.limit + 1;
-    var end = Math.min(data.page * data.limit, data.total);
-    var totalPages = Math.max(1, Math.ceil(data.total / data.limit));
+    // Pagination based on filtered count
+    var filtered = allEntries.length;
+    var totalPages = Math.max(1, Math.ceil(filtered / limit));
+    if (currentPage > totalPages) currentPage = totalPages;
+    var start = (currentPage - 1) * limit;
+    var pageEntries = allEntries.slice(start, start + limit);
+    totalEntries = filtered;
 
-    var scopeNote = isScopeAll(scopePatterns) ? '' : ' (scope: ' + entries.length + ' matched)';
-    if (data.total === 0) {
-      $summary.textContent = 'No entries found.';
+    var scopeNote = isScopeAll(scopePatterns) ? '' : ' (scope: ' + filtered + ' of ' + data.total + ')';
+    if (filtered === 0) {
+      $summary.textContent = isScopeAll(scopePatterns) ? 'No entries found.' : 'No entries match scope.';
     } else {
-      $summary.textContent = 'Showing ' + start + '\u2013' + end + ' of ' + data.total + ' entries' + scopeNote;
+      $summary.textContent = 'Showing ' + (start + 1) + '\u2013' + (start + pageEntries.length) + ' of ' + filtered + ' entries' + scopeNote;
     }
 
     $body.innerHTML = '';
 
-    if (entries.length === 0) {
+    if (pageEntries.length === 0) {
       var msg = isScopeAll(scopePatterns) ? 'No log entries match your filters.' : 'No entries match your filters and scope.';
       $body.innerHTML = '<tr><td colspan="7" class="empty-state">' + msg + '</td></tr>';
       $pagination.style.display = 'none';
       return;
     }
 
-    entries.forEach(function(entry) {
+    pageEntries.forEach(function(entry) {
       var tr = document.createElement('tr');
       tr.innerHTML =
         '<td>' + escapeHtml(entry.timestamp) + '</td>' +
@@ -1626,15 +1629,22 @@
     });
 
     $pagination.style.display = 'flex';
-    $pageInfo.textContent = 'Page ' + data.page + ' of ' + totalPages;
-    $prevBtn.disabled = data.page <= 1;
-    $nextBtn.disabled = data.page >= totalPages;
+    $pageInfo.textContent = 'Page ' + currentPage + ' of ' + totalPages;
+    $prevBtn.disabled = currentPage <= 1;
+    $nextBtn.disabled = currentPage >= totalPages;
   }
 
   function fetchLogs() {
     var params = getFilters();
-    params.set('page', String(currentPage));
-    params.set('limit', String(limit));
+    if (isScopeAll(scopePatterns)) {
+      // Server-side pagination when no scope filter
+      params.set('page', String(currentPage));
+      params.set('limit', String(limit));
+    } else {
+      // Fetch all entries for client-side scope filtering + pagination
+      params.set('page', '1');
+      params.set('limit', '10000');
+    }
 
     fetch('/api/logs?' + params.toString())
       .then(function(res) { return res.json(); })

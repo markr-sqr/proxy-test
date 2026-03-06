@@ -151,6 +151,46 @@ def _check_risks(method, url, headers="", body=""):
     return risks
 
 
+_SECURITY_HEADERS = {
+    "strict-transport-security": ("HIGH", "Missing Strict-Transport-Security (HSTS) header"),
+    "content-security-policy": ("MEDIUM", "Missing Content-Security-Policy (CSP) header"),
+    "x-content-type-options": ("LOW", "Missing X-Content-Type-Options header"),
+    "x-frame-options": ("LOW", "Missing X-Frame-Options header"),
+    "referrer-policy": ("LOW", "Missing Referrer-Policy header"),
+    "permissions-policy": ("LOW", "Missing Permissions-Policy header"),
+}
+
+
+def _check_response_risks(resp_headers_str, url=""):
+    """Check response headers for missing security headers.
+
+    Only flags missing headers on HTML responses (Content-Type text/html)
+    to avoid noise on API/image/font responses.
+    """
+    risks = []
+    headers_lower = resp_headers_str.lower()
+
+    # Only check security headers on HTML responses
+    is_html = "content-type:" in headers_lower and "text/html" in headers_lower
+    if not is_html:
+        return risks
+
+    present = set()
+    for line in resp_headers_str.split("\r\n"):
+        if ":" in line:
+            name = line.split(":", 1)[0].strip().lower()
+            present.add(name)
+
+    for header, (severity, desc) in _SECURITY_HEADERS.items():
+        if header not in present:
+            # HSTS only relevant for HTTPS
+            if header == "strict-transport-security" and url.startswith("http://"):
+                continue
+            risks.append((severity, desc))
+
+    return risks
+
+
 def _check_host_risks(host):
     """Check SSRF indicators on a host string (for CONNECT targets)."""
     risks = []
@@ -362,8 +402,10 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
             parsed = _parse_response(response_buf)
             if parsed:
                 status_line, resp_headers, resp_body, status_code = parsed
+                resp_risks = _check_response_risks(resp_headers, full_url)
+                all_risks = risks + resp_risks
                 resp_payload = _build_response_payload(status_line, resp_headers, resp_body)
-                log_request(addr, method, full_url, status_code, risks, payload=payload,
+                log_request(addr, method, full_url, status_code, all_risks, payload=payload,
                             response=resp_payload)
             else:
                 log_request(addr, method, full_url, "MITM", risks, payload=payload)
@@ -534,8 +576,10 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
         parsed = _parse_response(response_buf)
         if parsed:
             status_line, resp_headers, resp_body, status_code = parsed
+            resp_risks = _check_response_risks(resp_headers, url)
+            all_risks = risks + resp_risks
             resp_payload = _build_response_payload(status_line, resp_headers, resp_body)
-            log_request(addr, method, url, status_code, risks, payload=payload,
+            log_request(addr, method, url, status_code, all_risks, payload=payload,
                         response=resp_payload)
         else:
             log_request(addr, method, url, "->", risks, payload=payload)
