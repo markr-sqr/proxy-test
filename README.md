@@ -2,6 +2,21 @@
 
 A Python HTTP/HTTPS forward proxy with optional TLS interception (man-in-the-middle), built-in security risk detection, request payload capture, and a web-based log viewer. Designed for development, debugging, and traffic inspection.
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start (Docker)](#quick-start-docker--recommended)
+- [Alternative: Manual Setup](#alternative-manual-setup-without-docker)
+- [Command-Line Reference](#command-line-reference)
+- [Operating Modes](#operating-modes)
+- [Security Risk Detection](#security-risk-detection)
+- [Log Viewer](#log-viewer)
+- [Log Format](#log-format)
+- [Certificate Management](#certificate-management)
+- [Testing](#testing)
+- [Project Structure](#project-structure)
+- [Security Considerations](#security-considerations)
+
 ## Features
 
 - **HTTP forwarding** — proxies plain HTTP requests with full method, URL, and header visibility
@@ -297,11 +312,28 @@ To regenerate everything: `rm -rf certs/` and restart with `--mitm`.
 
 ## Testing
 
+The project has two test suites: a legacy bash/TAP suite (52 tests) and a comprehensive pytest suite (75 tests) covering sensitive data extraction, security detection, proxy core behaviour, viewer API, and browser UI.
+
+### Pytest Suite (Recommended)
+
+```bash
+# 1. One-time setup
+bash tests/setup_test_venv.sh
+
+# 2. Smoke tests (~30 s, stops on first failure)
+sg docker "bash tests/run_smoke.sh"
+
+# 3. Full regression suite (~2-3 min)
+sg docker "bash tests/run_regression.sh"
+```
+
+Reports are written to `tests/reports/` (HTML + JUnit XML). See [TEST_STRATEGY.md](TEST_STRATEGY.md) for the full testing strategy, test matrix, architecture, fixture reference, and critical success factors.
+
+### Legacy Bash Suite
+
 ```bash
 bash tests/run_all.sh
 ```
-
-The test suite bootstraps a venv automatically, runs all test scripts, and prints a TAP-style summary.
 
 | Test file | Tests | Coverage |
 |-----------|-------|----------|
@@ -313,12 +345,6 @@ The test suite bootstraps a venv automatically, runs all test scripts, and print
 | `test_errors.sh` | 3 | Unreachable host, malformed request, CONNECT errors |
 | `test_security.sh` | 16 | All security checks, false positive verification |
 | **Total** | **52** | |
-
-Run a single test file:
-
-```bash
-bash tests/test_security.sh
-```
 
 ## Project Structure
 
