@@ -2,8 +2,12 @@
 __pycache__/
 *.pyc
 
-# Virtual environment
+# Virtual environments
 .venv/
+.venv-test/
 
 # Generated certs
 certs/
+
+# Test reports
+tests/reports/
