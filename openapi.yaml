@@ -177,8 +177,8 @@ components:
           example: 39052
         method:
           type: string
-          description: HTTP method.
-          enum: [GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT, TRACE]
+          description: HTTP method or `WS` for WebSocket connections.
+          enum: [GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT, TRACE, WS]
           example: GET
         target:
           type: string
@@ -209,6 +209,11 @@ components:
           description: Sensitive data findings extracted from headers, URL, and body. Absent if none detected.
           items:
             $ref: "#/components/schemas/SensitiveDataFinding"
+        ws_frames:
+          type: array
+          description: WebSocket frames captured during the connection. Present only for `WS` method entries. Capped at 200 frames.
+          items:
+            $ref: "#/components/schemas/WsFrame"
 
     Risk:
       type: object
@@ -324,3 +329,47 @@ components:
           type: string
           description: Decoded representation, if applicable (e.g., decoded JWT payload, decoded Basic auth credentials).
           example: "{\"sub\":\"1234567890\",\"name\":\"John\"}"
+
+    WsFrame:
+      type: object
+      required: [direction, timestamp, opcode, opcode_name, fin, masked, payload_len, payload, payload_truncated]
+      properties:
+        direction:
+          type: string
+          enum: [client, server]
+          description: Whether the frame was sent by the client or the server.
+          example: client
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the frame was captured.
+          example: "2026-03-06T12:00:00.123456+00:00"
+        opcode:
+          type: integer
+          description: "WebSocket frame opcode (0x0=continuation, 0x1=text, 0x2=binary, 0x8=close, 0x9=ping, 0xA=pong)."
+          example: 1
+        opcode_name:
+          type: string
+          description: Human-readable opcode name.
+          enum: [continuation, text, binary, close, ping, pong]
+          example: text
+        fin:
+          type: boolean
+          description: Whether the FIN bit is set (final fragment).
+          example: true
+        masked:
+          type: boolean
+          description: Whether the frame payload was masked (client frames are always masked).
+          example: true
+        payload_len:
+          type: integer
+          description: Original payload length in bytes (before truncation).
+          example: 13
+        payload:
+          type: string
+          description: Frame payload. Text frames are UTF-8 strings; binary frames are base64-encoded.
+          example: "Hello, World!"
+        payload_truncated:
+          type: boolean
+          description: "`true` if payload was truncated at 4 KB."
+          example: false

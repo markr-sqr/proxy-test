@@ -9,6 +9,7 @@ import re
 import socket
 import select
 import ssl
+import struct
 import threading
 from datetime import datetime, timezone
 from urllib.parse import unquote_plus
@@ -17,6 +18,8 @@ BUFFER_SIZE = 65536
 DEFAULT_PORT = 8080
 LOG_FILE = os.environ.get("PROXY_LOG_FILE", "/tmp/proxy.log")
 MAX_BODY_LOG = 8192
+MAX_WS_FRAMES = 200
+MAX_WS_PAYLOAD = 4096
 
 _log_lock = threading.Lock()
 _ca_cert = None
@@ -394,6 +397,201 @@ _CONTENT_LENGTH_RE = re.compile(
 )
 _SUSPICIOUS_METHODS = {"TRACE", "TRACK", "DEBUG"}
 
+# ── WebSocket support ────────────────────────────────────────────────────────
+_UPGRADE_WS_RE = re.compile(r"^Upgrade:\s*websocket\s*$", re.IGNORECASE | re.MULTILINE)
+_CONNECTION_UPGRADE_RE = re.compile(r"^Connection:.*\bUpgrade\b", re.IGNORECASE | re.MULTILINE)
+
+
+def _is_websocket_upgrade(headers_str):
+    """Check if headers indicate a WebSocket upgrade request."""
+    return bool(_UPGRADE_WS_RE.search(headers_str) and _CONNECTION_UPGRADE_RE.search(headers_str))
+
+
+_WS_OPCODES = {
+    0x0: "continuation",
+    0x1: "text",
+    0x2: "binary",
+    0x8: "close",
+    0x9: "ping",
+    0xA: "pong",
+}
+
+
+def _parse_ws_frame(data, offset=0):
+    """Parse a single WebSocket frame from data starting at offset.
+
+    Returns (frame_dict, bytes_consumed) or (None, 0) if incomplete.
+    """
+    remaining = len(data) - offset
+    if remaining < 2:
+        return None, 0
+
+    b0 = data[offset]
+    b1 = data[offset + 1]
+    fin = bool(b0 & 0x80)
+    opcode = b0 & 0x0F
+    masked = bool(b1 & 0x80)
+    payload_len = b1 & 0x7F
+
+    header_size = 2
+    if payload_len == 126:
+        if remaining < 4:
+            return None, 0
+        payload_len = struct.unpack("!H", data[offset + 2:offset + 4])[0]
+        header_size = 4
+    elif payload_len == 127:
+        if remaining < 10:
+            return None, 0
+        payload_len = struct.unpack("!Q", data[offset + 2:offset + 10])[0]
+        header_size = 10
+
+    if masked:
+        header_size += 4
+
+    total = header_size + payload_len
+    if remaining < total:
+        return None, 0
+
+    mask_key = None
+    if masked:
+        mask_start = header_size - 4
+        mask_key = data[offset + mask_start:offset + mask_start + 4]
+
+    payload_start = offset + header_size
+    payload_bytes = bytearray(data[payload_start:payload_start + payload_len])
+
+    if masked and mask_key:
+        for i in range(len(payload_bytes)):
+            payload_bytes[i] ^= mask_key[i % 4]
+
+    # Encode payload for logging
+    truncated = payload_len > MAX_WS_PAYLOAD
+    display_bytes = bytes(payload_bytes[:MAX_WS_PAYLOAD])
+
+    if opcode == 0x1:  # text
+        payload_str = display_bytes.decode("utf-8", errors="replace")
+    else:
+        payload_str = base64.b64encode(display_bytes).decode("ascii")
+
+    opcode_name = _WS_OPCODES.get(opcode, f"unknown(0x{opcode:02x})")
+
+    frame = {
+        "direction": "",  # filled by caller
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "opcode": opcode,
+        "opcode_name": opcode_name,
+        "fin": fin,
+        "masked": masked,
+        "payload_len": payload_len,
+        "payload": payload_str,
+        "payload_truncated": truncated,
+    }
+    return frame, total
+
+
+def _ws_relay(client_sock, remote_sock, url, addr, req_payload, resp_payload,
+              risks, header_rest, body_text):
+    """Relay WebSocket frames bidirectionally, logging frames."""
+    sockets = [client_sock, remote_sock]
+    ws_frames = []
+    client_buf = b""
+    server_buf = b""
+
+    def _drain_pending(sock):
+        """Drain SSL-buffered data if sock is an SSLSocket."""
+        chunks = b""
+        if isinstance(sock, ssl.SSLSocket):
+            while sock.pending() > 0:
+                extra = sock.recv(sock.pending())
+                if not extra:
+                    break
+                chunks += extra
+        return chunks
+
+    try:
+        while True:
+            readable, _, exceptional = select.select(sockets, [], sockets, 30)
+            if exceptional:
+                break
+            if not readable:
+                continue
+
+            for sock in readable:
+                try:
+                    data = sock.recv(BUFFER_SIZE)
+                except (ssl.SSLError, OSError):
+                    data = b""
+                if not data:
+                    # Connection closed
+                    raise _WSClosed()
+
+                # Forward raw bytes immediately
+                target_sock = remote_sock if sock is client_sock else client_sock
+                target_sock.sendall(data)
+
+                # Drain any SSL-buffered data
+                extra = _drain_pending(sock)
+                if extra:
+                    target_sock.sendall(extra)
+                    data += extra
+
+                # Parse frames for logging
+                direction = "client" if sock is client_sock else "server"
+                buf = client_buf if sock is client_sock else server_buf
+                buf += data
+
+                while len(ws_frames) < MAX_WS_FRAMES:
+                    frame, consumed = _parse_ws_frame(buf, 0)
+                    if frame is None:
+                        break
+                    frame["direction"] = direction
+                    ws_frames.append(frame)
+
+                    # Scan text payloads for sensitive data
+                    if frame["opcode"] == 0x1:
+                        findings_placeholder = []
+                        _scan_body(frame["payload"], f"ws_frame_{direction}", findings_placeholder)
+
+                    buf = buf[consumed:]
+
+                if sock is client_sock:
+                    client_buf = buf
+                else:
+                    server_buf = buf
+
+    except _WSClosed:
+        pass
+    except Exception:
+        pass
+    finally:
+        # Build sensitive data from request/response + ws frames
+        resp_headers = ""
+        resp_body_text = ""
+        if resp_payload:
+            resp_headers = "\r\n".join(f"{h[0]}: {h[1]}" for h in resp_payload.get("headers", []))
+            resp_body_text = resp_payload.get("body", "")
+        sens = _extract_sensitive_data(url, header_rest, body_text, resp_headers, resp_body_text)
+
+        # Also scan WS frame payloads
+        for frame in ws_frames:
+            if frame["opcode"] == 0x1:
+                _scan_body(frame["payload"], f"ws_frame_{frame['direction']}", sens)
+
+        log_request(addr, "WS", url, "101", risks, payload=req_payload,
+                    response=resp_payload, sensitive_data=sens or None,
+                    ws_frames=ws_frames)
+
+        for s in sockets:
+            try:
+                s.close()
+            except OSError:
+                pass
+
+
+class _WSClosed(Exception):
+    """Sentinel for WebSocket connection close."""
+    pass
+
 
 def _check_risks(method, url, headers="", body=""):
     """Inspect a request for common attack patterns.
@@ -582,7 +780,7 @@ def _parse_response(data):
 
 
 def log_request(client_addr, method, target, status="->", risks=None, payload=None,
-                response=None, sensitive_data=None):
+                response=None, sensitive_data=None, ws_frames=None):
     """Log a request to stdout and append a JSONL line to LOG_FILE."""
     if risks is None:
         risks = []
@@ -598,6 +796,8 @@ def log_request(client_addr, method, target, status="->", risks=None, payload=No
             print(f"  {YELLOW}\U0001f512 {len(sensitive_data)} sensitive data finding(s){RESET}")
             for sd in sensitive_data:
                 print(f"    {sd['type']}: {sd['field_name']} [{sd['source']}]")
+        if ws_frames:
+            print(f"  {CYAN}\U0001f310 WebSocket: {len(ws_frames)} frame(s) captured{RESET}")
 
         entry = {
             "timestamp": ts.isoformat(),
@@ -614,6 +814,8 @@ def log_request(client_addr, method, target, status="->", risks=None, payload=No
             entry["response"] = response
         if sensitive_data:
             entry["sensitive_data"] = sensitive_data
+        if ws_frames:
+            entry["ws_frames"] = ws_frames
         try:
             with open(LOG_FILE, "a") as f:
                 f.write(json.dumps(entry) + "\n")
@@ -698,9 +900,10 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
     # Track pending request to pair with its response
     pending_req = None  # (method, full_url, risks, payload)
     response_buf = b""
+    _pending_ws_upgrade = None  # (full_url, risks, payload, header_rest, body_text)
 
     def _flush_response():
-        nonlocal pending_req, response_buf
+        nonlocal pending_req, response_buf, _pending_ws_upgrade
         if pending_req and response_buf:
             method, full_url, risks, payload = pending_req
             parsed = _parse_response(response_buf)
@@ -730,6 +933,7 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
                         sensitive_data=sens or None)
         pending_req = None
         response_buf = b""
+        _pending_ws_upgrade = None
 
     while True:
         readable, _, exceptional = select.select(sockets, [], sockets, 30)
@@ -752,11 +956,54 @@ def _mitm_relay(client_tls, remote_tls, host, addr):
                 _flush_response()
                 pending_req = _parse_mitm_request(data, host)
                 remote_tls.sendall(data)
+
+                # Check for WebSocket upgrade
+                if pending_req:
+                    _, full_url, risks, payload = pending_req
+                    # Extract headers from the raw data
+                    header_body = data.split(b"\r\n\r\n", 1)
+                    if len(header_body) == 2:
+                        hdr_block = header_body[0].decode("ascii", errors="replace")
+                        body_bytes = header_body[1]
+                        if "\r\n" in hdr_block:
+                            _, hdrs_str = hdr_block.split("\r\n", 1)
+                        else:
+                            hdrs_str = ""
+                    else:
+                        hdrs_str = ""
+                        body_bytes = b""
+
+                    if _is_websocket_upgrade(hdrs_str):
+                        body_text = body_bytes.decode("ascii", errors="replace") if body_bytes else ""
+                        _pending_ws_upgrade = (full_url, risks, payload, hdrs_str, body_text)
             else:
                 # Response from server
                 if len(response_buf) < MAX_BODY_LOG + 8192:
                     response_buf += data
-                client_tls.sendall(data)
+
+                # Check for WebSocket 101 upgrade response
+                if _pending_ws_upgrade:
+                    if b"\r\n\r\n" in response_buf:
+                        parsed = _parse_response(response_buf)
+                        if parsed and parsed[3] == "101":
+                            # Forward the 101 to client
+                            client_tls.sendall(response_buf)
+                            full_url, risks, payload, hdrs_str, body_text = _pending_ws_upgrade
+                            resp_payload = _build_response_payload(parsed[0], parsed[1], parsed[2])
+                            pending_req = None
+                            response_buf = b""
+                            _pending_ws_upgrade = None
+                            # Enter WS relay — it will log and close sockets
+                            _ws_relay(client_tls, remote_tls, full_url, addr, payload,
+                                      resp_payload, risks, hdrs_str, body_text)
+                            return
+                        else:
+                            # Not 101, flush buffered data
+                            _pending_ws_upgrade = None
+                            client_tls.sendall(response_buf)
+                    # Still waiting for full headers — don't forward yet
+                else:
+                    client_tls.sendall(data)
 
             # Drain any SSL-buffered data not visible to select()
             while sock.pending() > 0:
@@ -871,6 +1118,8 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
         return
 
     request = f"{method} {path} {version}\r\n{forwarded_headers}"
+    is_ws_upgrade = _is_websocket_upgrade(header_rest)
+
     try:
         remote_sock.sendall(request.encode())
         if body_start:
@@ -886,6 +1135,28 @@ def handle_http(client_sock, method, url, version, header_rest, addr,
                 break
             if len(response_buf) < MAX_BODY_LOG + 8192:
                 response_buf += data
+
+            # Check for WebSocket 101 response
+            if is_ws_upgrade:
+                if b"\r\n\r\n" in response_buf:
+                    parsed_resp = _parse_response(response_buf)
+                    if parsed_resp and parsed_resp[3] == "101":
+                        # Forward the 101 to client
+                        client_sock.sendall(response_buf)
+                        resp_payload = _build_response_payload(
+                            parsed_resp[0], parsed_resp[1], parsed_resp[2])
+                        # Enter WS relay — it will log and close sockets
+                        _ws_relay(client_sock, remote_sock, url, addr, payload,
+                                  resp_payload, risks, header_rest, body_text)
+                        return
+                    else:
+                        # Not 101, flush buffered data and fall through
+                        is_ws_upgrade = False
+                        client_sock.sendall(response_buf)
+                        continue
+                # Still waiting for full headers — don't forward yet
+                continue
+
             client_sock.sendall(data)
 
         # Parse and log response

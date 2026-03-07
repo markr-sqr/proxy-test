@@ -250,6 +250,84 @@
   .method-CONNECT { background: #1e1046; color: #a371f7; }
   .method-HEAD { background: #1c2128; color: #8b949e; }
   .method-OPTIONS { background: #1c2128; color: #8b949e; }
+  .method-WS { background: #0c2d6b; color: #58a6ff; }
+
+  /* WebSocket frames section */
+  .ws-frames-section { margin-top: 4px; }
+
+  .ws-frame-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .ws-frame {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .ws-frame-client {
+    background: #0c2244;
+    border-left: 3px solid #1f6feb;
+  }
+
+  .ws-frame-server {
+    background: #0d2818;
+    border-left: 3px solid #238636;
+  }
+
+  .ws-dir-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .ws-dir-client { background: #1f6feb; color: #fff; }
+  .ws-dir-server { background: #238636; color: #fff; }
+
+  .ws-opcode {
+    color: #8b949e;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .ws-ts {
+    color: #484f58;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .ws-payload {
+    flex: 1;
+    word-break: break-all;
+    color: #c9d1d9;
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ws-size {
+    color: #484f58;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .ws-cap-note {
+    font-size: 11px;
+    color: #8b949e;
+    font-style: italic;
+    margin-top: 4px;
+  }
 
   /* Severity badges */
   .severity-badge {
@@ -767,6 +845,7 @@
   .bar-CONNECT { background: #6e40c9; }
   .bar-HEAD { background: #484f58; }
   .bar-OPTIONS { background: #484f58; }
+  .bar-WS { background: #1f6feb; }
 
   /* Status colors */
   .bar-2xx { background: #238636; }
@@ -1107,6 +1186,7 @@
         <option>CONNECT</option>
         <option>HEAD</option>
         <option>OPTIONS</option>
+        <option>WS</option>
       </select>
     </div>
     <div class="filter-group filter-group-url">
@@ -1765,7 +1845,33 @@
       html += '</div>';
     }
 
-    if ((!entry.risks || entry.risks.length === 0) && !p && !r) {
+    // WebSocket frames section
+    var wsf = entry.ws_frames;
+    if (wsf && wsf.length > 0) {
+      html += '<div><div class="detail-section-title">WebSocket Frames (' + wsf.length + ')</div>';
+      html += '<div class="ws-frames-section"><div class="ws-frame-list">';
+      wsf.forEach(function(f) {
+        var dirCls = f.direction === 'client' ? 'ws-frame-client' : 'ws-frame-server';
+        var dirBadge = f.direction === 'client' ? 'ws-dir-client' : 'ws-dir-server';
+        var dirLabel = f.direction === 'client' ? 'CLI' : 'SRV';
+        var ts = f.timestamp ? f.timestamp.split('T')[1] || f.timestamp : '';
+        if (ts.length > 12) ts = ts.substring(0, 12);
+        html += '<div class="ws-frame ' + dirCls + '">';
+        html += '<span class="ws-dir-badge ' + dirBadge + '">' + dirLabel + '</span>';
+        html += '<span class="ws-opcode">' + escapeHtml(f.opcode_name) + '</span>';
+        html += '<span class="ws-ts">' + escapeHtml(ts) + '</span>';
+        html += '<span class="ws-payload">' + escapeHtml(f.payload || '') + '</span>';
+        html += '<span class="ws-size">' + f.payload_len + 'B</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+      if (wsf.length >= 200) {
+        html += '<div class="ws-cap-note">Capped at 200 frames</div>';
+      }
+      html += '</div></div>';
+    }
+
+    if ((!entry.risks || entry.risks.length === 0) && !p && !r && (!wsf || wsf.length === 0)) {
       html += '<div style="color:#484f58">No risks detected. No payload captured.</div>';
     }
 
