@@ -27,6 +27,18 @@ export interface SensitiveDataFinding {
   decoded?: string;
 }
 
+export interface WsFrame {
+  direction: "client" | "server";
+  timestamp: string;
+  opcode: number;
+  opcode_name: string;
+  fin: boolean;
+  masked: boolean;
+  payload_len: number;
+  payload: string;
+  payload_truncated: boolean;
+}
+
 export interface LogEntry {
   timestamp: string;
   client_ip: string;
@@ -38,6 +50,7 @@ export interface LogEntry {
   payload?: Payload;
   response?: ResponsePayload;
   sensitive_data?: SensitiveDataFinding[];
+  ws_frames?: WsFrame[];
 }
 
 export interface LogQuery {
